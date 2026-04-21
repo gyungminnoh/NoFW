@@ -15,10 +15,9 @@ static constexpr uint8_t PIN_PWM_C = PA8;    // Phase C
 
 // AS5048A SPI
 static constexpr uint8_t PIN_AS5048_CS = PB10;
-
-// UART (USART2)
-static constexpr uint8_t PIN_UART_TX = PA2;
-static constexpr uint8_t PIN_UART_RX = PA3;
+static constexpr uint8_t PIN_FRAM_CS   = PB12;
+static constexpr uint8_t PIN_SPI1_NCS_3 = PA4;
+static constexpr uint8_t PIN_TMAG5170_CS = PIN_SPI1_NCS_3;
 
 // =================== AS5600 (I2C) bootstrap only ===================
 static constexpr uint8_t AS5600_I2C_ADDR = 0x36;
@@ -60,10 +59,7 @@ static constexpr uint8_t  CAN_NODE_ID    = 7;
 static constexpr uint16_t CAN_ID_GRIP_CMD_BASE = 0x200;
 static constexpr uint16_t CAN_ID_GRIP_POS_BASE = 0x400;
 
-// STM32F446 CAN1 pins (CONFIRMED)
-static constexpr uint8_t PIN_CAN_RX = PA11;
-static constexpr uint8_t PIN_CAN_TX = PA12;
-
+// CAN uses the board's default CAN1 pin mapping provided by the STM32 core.
 // Transceiver: SN65HVD230 (no SW control unless STB/RS wired to MCU)
 
 // =================== User button ===================

@@ -24,7 +24,7 @@ static float applyInvert_(float pct) {
   return pct;
 }
 
-float clampPercent_(float x) {
+static float clampPercent_(float x) {
   if (x > 100.0f) return 100.0f;
   if (x < 0.0f) return 0.0f;
   return x;

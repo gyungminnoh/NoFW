@@ -19,15 +19,11 @@ static bool as5600ReadRawAngle_(uint16_t& out_raw) {
   Wire.write(0x0C);
   uint8_t tx_err = Wire.endTransmission(false);
   if (tx_err != 0) {
-    DebugSerial.print("[AS5600] I2C tx err=");
-    DebugSerial.println(tx_err);
     return false;
   }
 
   int rx = Wire.requestFrom((int)AS5600_I2C_ADDR, 2);
   if (rx != 2) {
-    DebugSerial.print("[AS5600] I2C rx len=");
-    DebugSerial.println(rx);
     return false;
   }
 
@@ -78,8 +74,6 @@ static bool readAs5600AngleRadSamples_(int samples, int delay_ms, float& out_rad
     if (ad > max_err) max_err = ad;
   }
   if (max_err > kMaxSpanRad) {
-    DebugSerial.print("[AS5600] unstable, max_err_rad=");
-    DebugSerial.println(max_err, 6);
     return false;
   }
 
@@ -92,11 +86,6 @@ bool bootstrapOutputOffset(float& out_rad) {
   if (!readAs5600AngleRadSamples_(5, 2, out_rad)) {
     return false;
   }
-
-  DebugSerial.print("[AS5600] raw=");
-  DebugSerial.print((int)((out_rad * 4096.0f) / _2PI) & 0x0FFF);
-  DebugSerial.print(" rad=");
-  DebugSerial.println(out_rad, 6);
 
   // We return boot reading for bookkeeping; GripperAPI will treat this as 0 alignment.
   return true;

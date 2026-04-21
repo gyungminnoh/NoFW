@@ -1,10 +1,8 @@
 #include "app.h"
-#include <EEPROM.h>
 
 extern "C" void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {};
 
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
@@ -42,8 +40,6 @@ extern "C" void SystemClock_Config(void) {
   }
 }
 
-HardwareSerial DebugSerial(USART2);
-
 AS5048A_CustomSensor sensor(PIN_AS5048_CS, SPI);
 BLDCMotor motor(POLE_PAIRS);
 BLDCDriver3PWM driver(PIN_PWM_A, PIN_PWM_B, PIN_PWM_C);
@@ -53,6 +49,7 @@ PositionVelocityController pvc;
 
 namespace {
 constexpr uint32_t kCalMagic = 0x43414C32; // "CAL2"
+constexpr uint16_t kCalAddr = 0;
 constexpr uint16_t kCalPressMs = 1000;
 constexpr uint16_t kClearPressMs = 3000;
 constexpr uint16_t kManualZeroPressMs = 5000;
@@ -64,25 +61,25 @@ struct CalData {
 };
 
 bool loadCalibration(CalData& out) {
-  EEPROM.get(0, out);
+  if (!FM25CL64B::readObject(kCalAddr, out)) return false;
   if (out.magic != kCalMagic) return false;
   if (out.sensor_dir != 1 && out.sensor_dir != -1) return false;
   return true;
 }
 
 void saveCalibration(const CalData& in) {
-  EEPROM.put(0, in);
+  FM25CL64B::writeObject(kCalAddr, in);
 }
 
 void clearCalibration() {
   const uint32_t empty_magic = 0;
-  EEPROM.put(0, empty_magic);
+  FM25CL64B::writeObject(kCalAddr, empty_magic);
 }
 
 enum class ButtonAction {
   None,
   Calibrate,
-  ClearEeprom,
+  ClearStorage,
   ManualZeroMode,
 };
 
@@ -102,7 +99,7 @@ ButtonAction updateLongPress(bool is_pressed) {
     uint32_t held_ms = millis() - press_start_ms;
     was_pressed = false;
     if (held_ms >= kManualZeroPressMs) return ButtonAction::ManualZeroMode;
-    if (held_ms >= kClearPressMs) return ButtonAction::ClearEeprom;
+    if (held_ms >= kClearPressMs) return ButtonAction::ClearStorage;
     if (held_ms >= kCalPressMs) return ButtonAction::Calibrate;
   }
   return ButtonAction::None;
@@ -137,14 +134,6 @@ static void motorBeepDouble() {
 }
 
 static void initSystem() {
-  // ---------- UART ----------
-  DebugSerial.setRx(PIN_UART_RX);
-  DebugSerial.setTx(PIN_UART_TX);
-  DebugSerial.begin(115200);
-  delay(200);
-
-  DebugSerial.println("\n=== SimpleFOC 3PWM + AS5048A + CAN Gripper (Option A) ===");
-
   // ---------- DRV8302 strap pins ----------
   pinMode(PIN_EN_GATE, OUTPUT);
   pinMode(PIN_M_PWM, OUTPUT);
@@ -160,7 +149,14 @@ static void initSystem() {
   digitalWrite(PIN_EN_GATE, LOW);
 
   // ---------- SPI & Sensor ----------
+  pinMode(PIN_AS5048_CS, OUTPUT);
+  digitalWrite(PIN_AS5048_CS, HIGH);
+  pinMode(PIN_FRAM_CS, OUTPUT);
+  digitalWrite(PIN_FRAM_CS, HIGH);
+  pinMode(PIN_SPI1_NCS_3, OUTPUT);
+  digitalWrite(PIN_SPI1_NCS_3, HIGH);
   SPI.begin();
+  FM25CL64B::begin();
   sensor.init();
   sensor.update();
 
@@ -168,15 +164,11 @@ static void initSystem() {
   // Read later (after FOC init) so AS5600 and motor MT are aligned in time.
 
   // ---------- CAN ----------
-  if (CanService::init()) {
-    DebugSerial.println("[CAN] OK: 1 Mbps");
-  } else {
-    DebugSerial.println("[CAN] WARN: begin failed (check core/pins/transceiver)");
-  }
+  CanService::init();
 
   // ---------- Driver ----------
   driver.voltage_power_supply = BUS_VOLTAGE;   // 40.0V
-  driver.voltage_limit        = VOLTAGE_LIMIT; // 24.0V
+  driver.voltage_limit        = VOLTAGE_LIMIT; // 40.0V
   driver.init();
 
   // ---------- Motor ----------
@@ -197,17 +189,14 @@ static void initSystem() {
 
   // ---------- Calibration gate ----------
   pinMode(PIN_USER_BTN, INPUT_PULLUP);
-  const bool force_calib = false;
   CalData cal = {};
   const bool have_cal = loadCalibration(cal);
-  if (!force_calib && have_cal) {
+  if (have_cal) {
     motor.sensor_direction = (Direction)cal.sensor_dir;
     motor.zero_electric_angle = cal.zero_elec;
     GripperAPI::as5600_zero_ref_rad = cal.as5600_zero_ref;
-    DebugSerial.println("[CAL] Using stored calibration");
   } else {
     GripperAPI::as5600_zero_ref_rad = 0.0f;
-    DebugSerial.println(force_calib ? "[CAL] Button pressed - calibrating" : "[CAL] No valid calibration - calibrating");
   }
 
   // Enable gate
@@ -217,14 +206,13 @@ static void initSystem() {
   // Init & FOC
   motor.init();
   int foc_ok = motor.initFOC();
-  if (foc_ok && (force_calib || !have_cal)) {
+  if (foc_ok && !have_cal) {
     CalData out = {};
     out.magic = kCalMagic;
     out.sensor_dir = (int8_t)motor.sensor_direction;
     out.zero_elec = motor.zero_electric_angle;
     out.as5600_zero_ref = GripperAPI::as5600_zero_ref_rad;
     saveCalibration(out);
-    DebugSerial.println("[CAL] Stored calibration");
     motorBeep();
   }
 
@@ -235,7 +223,6 @@ static void initSystem() {
   // Read AS5600 now (after FOC init) so it matches current motor MT.
   float as5600_boot_rad = 0.0f;
   if (!bootstrapOutputOffset(as5600_boot_rad)) {
-    DebugSerial.println("[AS5600] WARN: bootstrap read failed, keeping current as zero");
     as5600_boot_rad = GripperAPI::as5600_zero_ref_rad;
   }
 
@@ -250,15 +237,6 @@ static void initSystem() {
   pvc.vel_limit = 20.0f;
   pvc.accel_limit = 0.5f;
   pvc.reset();
-
-  DebugSerial.print("[BOOT] motor_zero_mt_rad=");
-  DebugSerial.println(GripperAPI::motor_zero_mt_rad, 6);
-  DebugSerial.print("[BOOT] as5600_raw_boot_rad=");
-  DebugSerial.println(GripperAPI::as5600_raw_boot_rad, 6);
-  DebugSerial.print("[CFG ] GEAR_RATIO=");
-  DebugSerial.println(GEAR_RATIO, 4);
-  DebugSerial.print("[CFG ] GRIP_OUTPUT_MAX_RAD=");
-  DebugSerial.println(GRIP_OUTPUT_MAX_RAD, 4);
 }
 
 void setup() {
@@ -278,11 +256,9 @@ void loop() {
     manual_zero_mode = true;
     motor.disable();
     motorBeep();
-    DebugSerial.println("[ZERO] Manual mode (torque off)");
   }
-  if (action == ButtonAction::ClearEeprom && !calibrating) {
+  if (action == ButtonAction::ClearStorage && !calibrating) {
     clearCalibration();
-    DebugSerial.println("[CAL] Cleared EEPROM");
     motorBeepDouble();
     need_calibration = true;
     motor.disable();
@@ -291,7 +267,6 @@ void loop() {
   if (action == ButtonAction::Calibrate && !calibrating) {
     calibrating = true;
     motorBeep();
-    DebugSerial.println("[CAL] Runtime calibration start");
     motor.disable();
     delay(50);
 
@@ -306,11 +281,8 @@ void loop() {
       out.zero_elec = motor.zero_electric_angle;
       out.as5600_zero_ref = GripperAPI::as5600_zero_ref_rad;
       saveCalibration(out);
-      DebugSerial.println("[CAL] Runtime calibration stored");
       motorBeepDouble();
       need_calibration = false;
-    } else {
-      DebugSerial.println("[CAL] Runtime calibration failed");
     }
 
     sensor.update();
@@ -318,7 +290,6 @@ void loop() {
     mt.reset(raw);
     float as5600_boot_rad = 0.0f;
     if (!bootstrapOutputOffset(as5600_boot_rad)) {
-      DebugSerial.println("[AS5600] WARN: bootstrap read failed, keeping current as zero");
       as5600_boot_rad = GripperAPI::as5600_zero_ref_rad;
     }
     GripperAPI::setBootReference(mt.mt_angle, as5600_boot_rad);
@@ -345,7 +316,6 @@ void loop() {
         GripperAPI::setBootReference(mt.mt_angle, zero_rad);
         GripperAPI::target_open_percent = GRIP_BOOT_OPEN_PERCENT;
         motor.enable();
-        DebugSerial.println("[ZERO] Stored AS5600 reference");
         motorBeepDouble();
         manual_zero_mode = false;
       }
@@ -386,20 +356,4 @@ void loop() {
 
   // Apply velocity command
   motor.move(vel_cmd);
-
-  // Optional debug print (slow)
-  static uint32_t t = 0;
-  if (millis() - t > 100) {
-    t = millis();
-    DebugSerial.print("pos_mt=");
-    DebugSerial.print(pos_mt, 4);
-    DebugSerial.print(" out_pct=");
-    DebugSerial.print(GripperAPI::motorMTToOutputPercent(pos_mt), 2);
-    DebugSerial.print(" target_pct=");
-    DebugSerial.print(GripperAPI::target_open_percent, 2);
-    DebugSerial.print(" target_mt=");
-    DebugSerial.print(motor_target_mt, 4);
-    DebugSerial.print(" vel_cmd=");
-    DebugSerial.println(vel_cmd, 4);
-  }
 }

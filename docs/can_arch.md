@@ -1,44 +1,28 @@
 # CAN Architecture
 
-Layers and responsibilities:
+이 펌웨어의 CAN 처리는 세 계층으로 나뉩니다.
 
-1) Transport (hardware access)
-   - Files: include/can_transport.h, src/can_transport.cpp
-   - Owns CAN pin setup, bitrate start, and raw RX frame fetch.
+1. Transport
+   - 파일: `include/can_transport.h`, `src/can_transport.cpp`
+   - 역할: CAN 하드웨어 시작, raw frame 수신, 표준 프레임 송신
 
-2) Protocol (payload definition)
-   - Files: include/can_protocol.h, src/can_protocol.cpp
-   - Defines CAN IDs and encoding/decoding rules (e.g., gripper command).
+2. Protocol
+   - 파일: `include/can_protocol.h`, `src/can_protocol.cpp`
+   - 역할: CAN ID 정의, payload 인코딩/디코딩
 
-3) Service (application policy)
-   - Files: include/can_service.h, src/can_service.cpp
-   - Pulls frames from transport, decodes using protocol, updates GripperAPI.
+3. Service
+   - 파일: `include/can_service.h`, `src/can_service.cpp`
+   - 역할: 수신 명령을 `GripperAPI`에 반영하고, 위치 보고와 timeout 정책을 수행
 
-Entry point:
-   - src/main.cpp calls CanService::init() once and CanService::poll() in loop().
+메인 제어 루프에서는 `src/main.cpp`가 `CanService::init()`를 한 번 호출하고, 이후 `loop()`에서 `CanService::poll()`을 반복 호출합니다.
 
-Namespace mapping:
-   - Transport: CanTransport
-   - Protocol: CanProtocol
-   - Service: CanService
+## 현재 정책
 
-Gripper command frame (Option A):
-   - Std ID: CAN_ID_GRIP_CMD_BASE + CAN_NODE_ID (e.g., base+7 when CAN_NODE_ID=7)
-   - Payload: data[0..1] = int16 little-endian centi-percent (0.01 %)
-   - Range: 0.00 .. 100.00 (open %; 0 = fully open, 100 = fully closed)
-   - Direction: if GRIP_INVERT_DIR=true, the meaning is inverted
-   - Example: 25.00 % -> 2500 (0x09C4) -> data[0]=0xC4, data[1]=0x09
+- 명령 수신 ID: `CAN_ID_GRIP_CMD_BASE + CAN_NODE_ID`
+- 위치 송신 ID: `CAN_ID_GRIP_POS_BASE + CAN_NODE_ID`
+- 명령 값: `0..100%` open percent
+- 위치 값: 현재 모터 위치 기반 open percent
+- timeout: 첫 유효 명령 수신 이후, `CAN_TIMEOUT_MS`를 넘기면 현재 위치 유지
+- 위치 송신 주기: `CAN_POS_TX_MS`
 
-Gripper position report (Option A):
-   - Std ID: CAN_ID_GRIP_POS_BASE + CAN_NODE_ID (e.g., base+7 when CAN_NODE_ID=7)
-   - Payload: data[0..1] = int16 little-endian centi-percent (0.01 %)
-   - Signal: current gripper open percent (boot-centered, clamped to [0, 100])
-   - Direction: if GRIP_INVERT_DIR=true, the meaning is inverted
-   - Period: CAN_POS_TX_MS in include/board_config.h (0=disable)
-
-Timeout behavior:
-   - CAN timeout constant: CAN_TIMEOUT_MS in include/board_config.h
-   - Current policy: "HOLD-CURRENT" (target is set to current output)
-   - One-shot: target is captured once when timeout is first detected
-   - Hysteresis: timeout clears only after RX is stable for RX_RECOVER_MS
-   - Timeout logic is active only after the first valid command is received
+세부 on-wire 형식은 [can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)를 참고하면 됩니다.

@@ -24,9 +24,6 @@ namespace GripperAPI {
   // AS5600 absolute angle that corresponds to output 0 (user-defined).
   extern float as5600_zero_ref_rad;
 
-  // Clamp percent to [0, 100].
-  float clampPercent_(float x);
-
   // Called at setup after FOC init and MT reset.
   void setBootReference(float motor_mt_now_rad, float as5600_boot_rad);
 

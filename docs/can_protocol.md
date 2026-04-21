@@ -1,65 +1,55 @@
-# CAN Frame Protocol (Gripper FW)
+# CAN Frame Protocol
 
-This document describes the on-wire CAN frames used by this firmware so an
-external controller can command and read gripper position.
+외부 컨트롤러가 현재 펌웨어와 통신할 때 맞춰야 하는 CAN 프레임 형식입니다.
 
-## Bus and addressing
+## Bus
 
-- Bitrate: 1 Mbps (see `include/board_config.h`)
-- Frame type: 11-bit standard ID
-- Node ID: `CAN_NODE_ID` (default: 7)
-- Endianness: little-endian for multi-byte fields
+- Bitrate: `1 Mbps`
+- Frame type: `11-bit standard ID`
+- Node ID: `CAN_NODE_ID` 기본값 `7`
+- Endianness: `little-endian`
 
 ## Frame IDs
 
-- Gripper command (RX): `CAN_ID_GRIP_CMD_BASE + CAN_NODE_ID`
-- Gripper position report (TX): `CAN_ID_GRIP_POS_BASE + CAN_NODE_ID`
-- Base IDs: `CAN_ID_GRIP_CMD_BASE = 0x200`, `CAN_ID_GRIP_POS_BASE = 0x400`
+- 명령 RX: `CAN_ID_GRIP_CMD_BASE + CAN_NODE_ID`
+- 위치 TX: `CAN_ID_GRIP_POS_BASE + CAN_NODE_ID`
+- 기본값 기준:
+  - RX ID = `0x200 + 7 = 0x207`
+  - TX ID = `0x400 + 7 = 0x407`
 
-Example with `CAN_NODE_ID = 7`:
+## Payload
 
-- Command ID: `CAN_ID_GRIP_CMD_BASE + 7`
-- Position ID: `CAN_ID_GRIP_POS_BASE + 7`
+두 프레임 모두 2바이트 signed integer `centi-percent`를 사용합니다.
 
-## Payload definitions (Option A)
-
-All payloads use a 2-byte signed integer in centi-percent.
-
-```
-int16 cp = (int16)(data[0] | (data[1] << 8));  // centi-percent
+```text
+cp = int16(data[0] | (data[1] << 8))
 percent = cp * 0.01
 ```
 
-### Gripper command (RX)
+## Gripper Command
 
 - ID: `CAN_ID_GRIP_CMD_BASE + CAN_NODE_ID`
-- DLC: 2
-- Payload: `int16` centi-percent (0.01%)
-- Meaning: target gripper open percent (0 = open, 100 = closed)
-- Direction: if `GRIP_INVERT_DIR` is true, the meaning is inverted
+- DLC: `2`
+- 의미: 목표 gripper open percent
+- 범위: `0.00 .. 100.00`
+- 해석: `0 = fully open`, `100 = fully closed`
+- 비고: 펌웨어 내부에서 수신값은 `[0, 100]`으로 clamp됨
 
-Example:
+예시:
 
-- 25.00% -> `cp = 2500` -> bytes: `C4 09`
-- 100.00% -> `cp = 10000` -> bytes: `10 27`
+- `25.00%` -> `2500` -> `C4 09`
+- `100.00%` -> `10000` -> `10 27`
 
-### Gripper position report (TX)
+## Gripper Position Report
 
 - ID: `CAN_ID_GRIP_POS_BASE + CAN_NODE_ID`
-- DLC: 2
-- Payload: `int16` centi-percent (0.01%)
-- Meaning: current gripper open percent (boot-centered, clamped to [0, 100])
-- Direction: if `GRIP_INVERT_DIR` is true, the meaning is inverted
-- Period: `CAN_POS_TX_MS` (default 50 ms, 0 disables TX)
+- DLC: `2`
+- 의미: 현재 모터 위치로부터 계산한 gripper open percent
+- 비고: 송신 전 clamp하지 않으므로 nominal range를 잠시 벗어날 수 있음
+- 송신 주기: `CAN_POS_TX_MS` 기본값 `50 ms`
 
-## Timeout behavior (receiver)
+## Timeout
 
-- If no valid command arrives for `CAN_TIMEOUT_MS` (default 100 ms), the
-  controller holds its current output angle (one-shot capture on timeout entry).
-- Timeout clears after a short RX recovery window (50 ms of stable RX).
-- Timeout logic is active only after the first valid command is received.
-
-## Notes
-
-- Commands are interpreted as absolute open percent, not delta.
-- Output is clamped to [0, 100] in firmware.
+- 첫 유효 명령을 받은 이후에만 timeout 로직이 활성화됨
+- `CAN_TIMEOUT_MS`를 넘기면 목표값을 현재 위치로 고정
+- 짧은 RX recovery window 이후 timeout 상태 해제
