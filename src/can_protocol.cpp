@@ -1,35 +1,98 @@
 #include "can_protocol.h"
 #include <math.h>
-#include <limits.h>
+#include <stdint.h>
 
 namespace CanProtocol {
 
-bool decodeGripCmd_OptionA(const uint8_t data[8], uint8_t len, float& out_open_percent) {
-  if (len < 2) return false;
+uint16_t outputAngleCmdCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_ANGLE_CMD_BASE + node_id;
+}
 
-  int16_t cp = (int16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
-  float pct = cp * 0.01f; // centi-percent -> percent
-  if (pct < 0.0f) pct = 0.0f;
-  if (pct > 100.0f) pct = 100.0f;
-  out_open_percent = pct;
+uint16_t outputAngleStatusCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_ANGLE_STATUS_BASE + node_id;
+}
+
+uint16_t outputVelocityCmdCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_VEL_CMD_BASE + node_id;
+}
+
+uint16_t outputVelocityStatusCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_VEL_STATUS_BASE + node_id;
+}
+
+uint16_t outputProfileCmdCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_PROFILE_CMD_BASE + node_id;
+}
+
+uint16_t powerStageCmdCanId(uint8_t node_id) {
+  return CAN_ID_POWER_STAGE_CMD_BASE + node_id;
+}
+
+namespace {
+
+bool decodeInt32MUnits_(const uint8_t data[8], uint8_t len, float& out_value) {
+  if (len < 4) return false;
+  const int32_t raw = static_cast<int32_t>(static_cast<uint32_t>(data[0]) |
+                                           (static_cast<uint32_t>(data[1]) << 8) |
+                                           (static_cast<uint32_t>(data[2]) << 16) |
+                                           (static_cast<uint32_t>(data[3]) << 24));
+  out_value = static_cast<float>(raw) * 0.001f;
   return true;
 }
 
-static inline int16_t clampInt16_(int32_t x) {
-  if (x > INT16_MAX) return INT16_MAX;
-  if (x < INT16_MIN) return INT16_MIN;
-  return (int16_t)x;
+bool encodeInt32MUnits_(float value, uint8_t data[8], uint8_t& out_len) {
+  const int32_t raw = static_cast<int32_t>(lroundf(value * 1000.0f));
+  data[0] = static_cast<uint8_t>(raw & 0xFF);
+  data[1] = static_cast<uint8_t>((raw >> 8) & 0xFF);
+  data[2] = static_cast<uint8_t>((raw >> 16) & 0xFF);
+  data[3] = static_cast<uint8_t>((raw >> 24) & 0xFF);
+  out_len = 4;
+  return true;
 }
 
-bool encodeGripPos_OptionA(float open_percent, uint8_t data[8], uint8_t& out_len) {
-  float pct = open_percent;
-  if (pct < 0.0f) pct = 0.0f;
-  if (pct > 100.0f) pct = 100.0f;
-  int32_t cp = (int32_t)lroundf(pct * 100.0f); // centi-percent
-  int16_t cp16 = clampInt16_(cp);
-  data[0] = (uint8_t)((uint16_t)cp16 & 0xFF);
-  data[1] = (uint8_t)(((uint16_t)cp16 >> 8) & 0xFF);
-  out_len = 2;
+}  // namespace
+
+bool decodeOutputAngleDeg_OptionA(const uint8_t data[8], uint8_t len, float& out_angle_deg) {
+  return decodeInt32MUnits_(data, len, out_angle_deg);
+}
+
+bool encodeOutputAngleDeg_OptionA(float angle_deg, uint8_t data[8], uint8_t& out_len) {
+  return encodeInt32MUnits_(angle_deg, data, out_len);
+}
+
+bool decodeOutputVelocityDegPerSec_OptionA(const uint8_t data[8],
+                                           uint8_t len,
+                                           float& out_velocity_deg_s) {
+  return decodeInt32MUnits_(data, len, out_velocity_deg_s);
+}
+
+bool encodeOutputVelocityDegPerSec_OptionA(float velocity_deg_s,
+                                           uint8_t data[8],
+                                           uint8_t& out_len) {
+  return encodeInt32MUnits_(velocity_deg_s, data, out_len);
+}
+
+bool decodeOutputProfileCmd_OptionA(const uint8_t data[8],
+                                    uint8_t len,
+                                    OutputEncoderType& out_profile) {
+  if (len < 1) return false;
+  switch (static_cast<OutputEncoderType>(data[0])) {
+    case OutputEncoderType::VelocityOnly:
+    case OutputEncoderType::As5600:
+    case OutputEncoderType::TmagLut:
+    case OutputEncoderType::DirectInput:
+      out_profile = static_cast<OutputEncoderType>(data[0]);
+      return true;
+  }
+  return false;
+}
+
+bool decodePowerStageCmd_OptionA(const uint8_t data[8],
+                                 uint8_t len,
+                                 bool& out_enable) {
+  if (len < 1) return false;
+  if (data[0] > 1) return false;
+  out_enable = (data[0] != 0);
   return true;
 }
 

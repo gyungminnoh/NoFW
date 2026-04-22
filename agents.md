@@ -2,15 +2,20 @@
 
 ## Purpose
 
-This repository targets a gripper firmware built around `STM32F446RE`.
-The main development flow is:
+This repository started as a gripper firmware for `STM32F446RE`, but the current refactor target is broader:
+
+- a reusable BLDC actuator firmware core
+- board-specific pin mapping decided at compile time
+- actuator-specific configuration and calibration stored in external FRAM
+- output-shaft control as the main coordinate system
+- support for different output encoder implementations (`AS5600` or `TMAG LUT`)
+
+The working flow remains:
 
 - build firmware with `PlatformIO`
 - upload through `ST-Link`
 - observe behavior through `CAN`
 - validate sensors and storage with dedicated diagnostic firmware
-
-This file summarizes the current working assumptions for future agent work.
 
 ## Available Tools
 
@@ -24,6 +29,16 @@ The agent can use the following capabilities in this environment.
   Existing local image files can be opened and inspected.
 - Web access
   Available when needed, but most firmware work here should rely on the local repo and local hardware.
+
+## Agent Workflow Expectations
+
+- After each meaningful implementation step, update this `agents.md` file with:
+  - what was just completed
+  - what the next highest-priority task is
+- Unless a real user decision is required, do not stop at a checkpoint.
+  Continue directly to the next highest-priority task.
+- If `CAN` observation is needed and the Linux interface is down, first try to bring up `can0` at `1 Mbps`.
+  If privilege is insufficient, record that exact blocker and continue with non-blocked work.
 
 ## Hardware Interaction Limits
 
@@ -57,9 +72,15 @@ Those actions must be done by the user.
 - `AS5048A`
   Reads the motor input shaft angle.
 - `AS5600`
-  Reads the output shaft angle.
+  Reads the output shaft angle directly.
+  Depending on the actuator profile, it can be:
+  - the primary output encoder at runtime
+  - the reference encoder used to calibrate `TMAG LUT`
 - `TMAG5170`
-  Measures 3-axis magnetic field and is being evaluated as an output-angle estimator.
+  Measures 3-axis magnetic field.
+  Depending on the actuator profile, it can be:
+  - a calibration/validation sensor
+  - the primary output encoder through LUT-based software angle reconstruction
 
 Current working assumption for `TMAG5170`:
 
@@ -93,7 +114,7 @@ Main product firmware:
 - `custom_f446re`
 - entry point: `src/main.cpp`
 
-Main firmware behavior:
+Main firmware behavior before the refactor was:
 
 1. initialize SPI, CAN, motor driver, and motor control
 2. load stored calibration from FRAM
@@ -102,7 +123,7 @@ Main firmware behavior:
 5. read `AS5600` and define output-side zero reference
 6. run the control loop using sensor updates and CAN commands
 
-Main firmware uses:
+Main firmware currently uses:
 
 - `SimpleFOC`
 - `AS5048A`
@@ -110,12 +131,1038 @@ Main firmware uses:
 - `FM25CL64B` FRAM
 - `CAN`
 
+## Refactor Direction
+
+The current architecture direction decided in chat is:
+
+- control reference is `output shaft`
+- official CAN targets are `output angle` and `velocity`
+- if the actuator profile is `VelocityOnly`, output-axis-referenced velocity control may run without an output absolute encoder
+- if the actuator profile is `As5600` or `TmagLut`, output-angle motion requires a valid output encoder/calibration
+- board details stay compile-time
+- actuator configuration and calibration live in FRAM
+- output encoder is selected by actuator profile
+- app-specific logic should sit above a reusable actuator core
+
+Current intended split:
+
+- reusable core:
+  - motor drive / FOC
+  - actuator state machine
+  - CAN mode handling
+  - output encoder abstraction
+  - configuration and calibration persistence
+- product-specific app layer:
+  - gripper `% open`
+  - product-specific limits and semantics
+
+Current output-encoder operating modes clarified by the user:
+
+1. no output absolute encoder, using only output-axis-referenced velocity control
+2. `AS5600` as the runtime output encoder
+3. `TMAG LUT` as the runtime output encoder
+
+Additional user-confirmed calibration rule:
+
+- `TMAG LUT` runtime mode requires calibration first
+- that calibration flow uses `AS5600` as the reference encoder
+
+User-confirmed profile policy:
+
+- the stored runtime mode should be one of:
+  - `VelocityOnly`
+  - `As5600`
+  - `TmagLut`
+- `TMAG` calibration success must not auto-promote the runtime profile
+  Promotion to `TmagLut` should happen only when the stored profile is explicitly changed
+- `AS5600` is required for `TMAG` calibration, but not for `TMAG` runtime after calibration
+
+New direction requested by the user on `2026-04-22`:
+
+- this firmware should no longer be treated as a gripper-specific firmware
+- application-facing command/status units should move away from `% open`
+- output-angle commands should be represented in `deg`
+- output-velocity commands should be represented in `deg/s`
+- `VelocityOnly` should remain the "no output encoder, velocity only" mode
+- a separate "no output encoder but angle-capable" path is needed for `gear_ratio == 1:1`
+  because in that case the input encoder `AS5048A` is also the output encoder
+- runtime mode/profile changes should no longer require reflashing helper firmware
+- final intended firmware set should be only:
+  - one `TMAG` calibration firmware
+  - one main firmware
+
+Additional user decisions captured after that request:
+
+- the firmware should become fully actuator-generic rather than gripper-centric
+- command/status units should move to:
+  - angle: `deg`
+  - velocity: `deg/s`
+- "gripper compatibility" is not a design priority
+- actuator travel should be configured generically through:
+  - `output_min_deg`
+  - `output_max_deg`
+- for a gripper use-case, the user can simply set those min/max limits to the gripper travel range
+- for runtime mode changes over CAN, the implementation may choose the internal apply/save behavior pragmatically
+- additional clarification:
+  - when no separate output encoder is mounted but `gear_ratio == 1:1`,
+    the stored zero reference can still be persistent across reboots
+    because `AS5048A` is then also the output-angle sensor
+  - however this only removes the encoder-hardware problem; multi-turn absolute ambiguity after power loss still depends on travel range and system assumptions
+
+Implementation progress after those decisions:
+
+- the old gripper-centric runtime API has been replaced with an actuator-generic API:
+  - new file set:
+    - [include/actuator_api.h](/home/gyungminnoh/projects/NoFW/NoFW/include/actuator_api.h)
+    - [src/actuator_api.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/actuator_api.cpp)
+  - the main command/state units are now:
+    - output angle in `deg`
+    - output velocity in `deg/s`
+- `ActuatorConfig` now stores generic travel limits in:
+  - `output_min_deg`
+  - `output_max_deg`
+- legacy config/calibration bundle loading now migrates older stored records into the new config model
+- a new `DirectInput` profile has been added:
+  - enum value: `OutputEncoderType::DirectInput`
+  - this is the angle-capable `gear_ratio == 1:1` path without a separate output encoder
+  - it uses `AS5048A` directly as the output-angle sensor
+- new persistent zero storage for the direct-input path has been added:
+  - `DirectInputCalibrationData`
+  - stored inside `ConfigStore::CalibrationBundle`
+- a new runtime output encoder implementation has been added:
+  - [include/sensors/output_encoder_direct_input.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder_direct_input.h)
+  - [src/sensors/output_encoder_direct_input.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/output_encoder_direct_input.cpp)
+- the default legacy profile selection has changed:
+  - `gear_ratio <= 1` now defaults to `DirectInput`
+  - it no longer defaults to `VelocityOnly`
+- CAN command/status payloads are now actuator-generic:
+  - output angle command/status:
+    - ID base `0x200 / 0x400`
+    - payload: `int32` little-endian `mdeg`
+  - output velocity command/status:
+    - ID base `0x210 / 0x410`
+    - payload: `int32` little-endian `mdeg/s`
+- main firmware control-mode behavior is now command-driven instead of profile-overloaded:
+  - receiving an angle command switches runtime control to `OutputAngle`
+  - receiving a velocity command switches runtime control to `OutputVelocity`
+  - timeout now:
+    - holds current angle in angle mode
+    - drives target velocity to zero in velocity mode
+- CAN-based persistent profile switching has been added to the main firmware:
+  - new command ID base:
+    - `0x220 + node_id`
+  - payload:
+    - `data[0] = OutputEncoderType`
+  - the main firmware now:
+    - receives the profile command
+    - applies the requested profile at runtime
+    - saves it into `FRAM`
+    - reflects the result on the existing runtime diagnostic frame `0x5F0 + node_id`
+- live hardware validation already completed for this new slice:
+  - `pio run -e custom_f446re` succeeded
+  - `pio run -e custom_f446re -t upload` succeeded
+  - `0x407` now emits 4-byte output-angle status in `mdeg`
+  - `0x417` now emits 4-byte output-velocity status in `mdeg/s`
+  - test command `0x207#50C30000` (`50.000 deg`) changed angle status upward
+  - test command `0x217#A0860100` (`100.000 deg/s`) changed velocity status
+  - runtime profile switching over CAN was verified on hardware:
+    - `0x227#00` switched runtime/stored profile to `VelocityOnly`
+    - diagnostic frame changed to `FB 00 00 02 01 00 00 00`
+    - `0x227#02` switched runtime/stored profile back to `TmagLut`
+    - diagnostic frame returned to `FB 02 02 01 01 01 00 01`
+- Documentation has now been rewritten to match the new actuator-generic protocol/model:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - docs now describe:
+    - `deg` / `deg/s` payload units
+    - `DirectInput` profile
+    - CAN-based runtime profile switching on `0x220 + node_id`
+    - the fact that reflashing helper firmware is no longer the intended profile-switch workflow
+
+## Current Refactor Status
+
+The following structural work is already done in the repository.
+
+- Output encoder abstraction added:
+  - [include/sensors/output_encoder.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder.h)
+- `AS5600` runtime implementation added:
+  - [include/sensors/output_encoder_as5600.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder_as5600.h)
+  - [src/sensors/output_encoder_as5600.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/output_encoder_as5600.cpp)
+- `TMAG LUT` runtime implementation skeleton added:
+  - [include/sensors/output_encoder_tmag_lut.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder_tmag_lut.h)
+  - [src/sensors/output_encoder_tmag_lut.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/output_encoder_tmag_lut.cpp)
+- Common `TMAG LUT` estimator extracted from the test firmware:
+  - [include/sensors/tmag_lut_estimator.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/tmag_lut_estimator.h)
+  - [src/sensors/tmag_lut_estimator.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/tmag_lut_estimator.cpp)
+- Common `TMAG LUT` calibration builder extracted from the test firmware:
+  - [include/sensors/tmag_calibration_builder.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/tmag_calibration_builder.h)
+  - [src/sensors/tmag_calibration_builder.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/tmag_calibration_builder.cpp)
+- Output encoder selection/ownership moved out of `main.cpp` into a manager:
+  - [include/sensors/output_encoder_manager.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder_manager.h)
+  - [src/sensors/output_encoder_manager.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/output_encoder_manager.cpp)
+- New persistent config/calibration types added:
+  - [include/config/actuator_types.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/actuator_types.h)
+  - [include/config/actuator_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/actuator_config.h)
+  - [include/config/calibration_data.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/calibration_data.h)
+- New FRAM-backed config store added:
+  - [include/storage/config_store.h](/home/gyungminnoh/projects/NoFW/NoFW/include/storage/config_store.h)
+  - [src/storage/config_store.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/storage/config_store.cpp)
+- Dedicated `TMAG` calibration runner added for hardware-side LUT learning and FRAM persistence:
+  - [src/tmag_calibration_runner/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/tmag_calibration_runner/main.cpp)
+  - PlatformIO environment: `tmag_calibration_runner_f446re`
+- Legacy default actuator-profile helper added:
+  - [include/config/actuator_defaults.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/actuator_defaults.h)
+  - [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp)
+- Shared calibration magic/constants extracted:
+  - [include/config/calibration_constants.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/calibration_constants.h)
+- `main.cpp` no longer calls `AS5600` low-level read helpers directly.
+  It now goes through the output encoder manager.
+- Old `bootstrapOutputOffset()` helper was removed because it became redundant.
+- Legacy calibration compatibility load/save was pushed down into `ConfigStore`.
+  The product firmware no longer keeps a local `CalData` compatibility shim in `main.cpp`.
+- Runtime now uses stored `ActuatorConfig` values for more than just persistence.
+  `GripperAPI` and `CAN` node-id selection now consume the stored config at runtime.
+- Verified builds after this refactor step:
+  - `pio run -e custom_f446re`
+  - `pio run -e tmag_calibration_runner_f446re`
+
+Important current behavior:
+
+- `custom_f446re` still behaves like the old `AS5600`-based product firmware by default.
+- `ActuatorConfig` is now loaded from FRAM if present; otherwise a legacy default config is created and stored.
+- Calibration loading now prefers the new bundle format and falls back to the old legacy record at address `0`.
+- The legacy calibration record is still written in parallel for compatibility.
+- `TMAG LUT` runtime evaluation code and calibration runner now exist in the main firmware tree, but the main product config still defaults to `AS5600`.
+- `TMAG` calibration can now be produced into `TmagCalibrationData` bundle format, but it still needs real hardware validation and runtime promotion policy.
+- Live hardware validation has now started:
+  - `can0` was brought up successfully at `1 Mbps`
+  - `tmag_calibration_runner_f446re` was uploaded successfully through `ST-Link`
+  - `candump` confirmed the runner is alive on `0x787/0x797/0x7A7/0x7B7`
+  - sample budget was increased to `3072`
+  - runner-side TMAG calibration ratio was separated from the app travel ratio and pinned to the validated `8:1` hardware path
+  - phase transition now uses absolute output-angle magnitude so opposite encoder installation direction does not block calibration
+  - a logic bug in `TmagCalibrationBuilder::build()` was fixed so its internal validation pass no longer rejects every calibration attempt
+  - the runner now completes `BootDelay(0) -> Calibrating(1) -> Validating(2) -> Done(3)` on real hardware
+  - live hardware result from the successful run:
+    - calibration sample count about `1490`
+    - valid LUT bins `256`
+    - calibration RMS about `1.09 deg`
+    - validation RMS about `1.12 deg`
+    - validation MAE about `0.48 deg`
+- FRAM persistence is now verified on hardware:
+  - a follow-up `fram_test_f446re` run loaded the stored bundle successfully
+  - CAN `0x5D7` reported `bundle_loaded=1`, `tmag.valid=1`, `valid_bin_count=256`
+- Runtime encoder selection is now more conservative:
+  - if the stored profile requests `TmagLut` but valid `TMAG` calibration is missing, runtime falls back to `AS5600`
+  - this keeps the current product firmware on a safe path until explicit promotion policy is finished
+- Product firmware now recognizes the three user-selected output mode families in config:
+  - `VelocityOnly`
+  - `As5600`
+  - `TmagLut`
+- Legacy/default profile construction is now mode-aware:
+  - `GEAR_RATIO <= 1:1` defaults to `VelocityOnly`
+  - higher-ratio legacy profiles still default to `As5600`
+- Main firmware calibration requirements are now mode-aware:
+  - `VelocityOnly` requires only valid `FOC` calibration
+  - `As5600` requires valid `FOC` plus valid `AS5600` calibration
+  - `TmagLut` requires valid `FOC` plus valid `TMAG` calibration
+- Main firmware boot reference handling is now mode-aware:
+  - encoder-backed modes align boot reference from the active output encoder
+  - `VelocityOnly` profiles fall back to a motor-based boot reference and do not require an output absolute read
+- Manual zero handling now skips encoder-zero writes when the active profile does not use an output absolute encoder
+- Main firmware now has an explicit runtime profile-switch path in the existing button maintenance flow:
+  - enter maintenance/manual-zero mode with the existing long press
+  - while in that mode, medium press cycles the stored runtime profile across selectable modes
+  - profile switching is explicit and persisted in `ActuatorConfig`
+  - `TMAG` is only selectable when valid `TMAG` calibration is already stored
+  - long press while already in maintenance mode exits that mode
+- `VelocityOnly` control semantics are now wired into the product firmware:
+  - the existing CAN command frame is interpreted as signed percent in `VelocityOnly`
+  - timeout policy for `VelocityOnly` now commands zero speed instead of hold-position
+  - the existing CAN status frame reports signed output-velocity percent in `VelocityOnly`
+  - encoder-backed profiles keep the previous `% open` semantics
+- Added a tiny FRAM-backed actuator-config utility firmware for hardware-side profile changes without button interaction:
+  - PlatformIO environments:
+    - `actuator_config_velocityonly_f446re`
+    - `actuator_config_as5600_f446re`
+    - `actuator_config_tmag_f446re`
+  - entry point:
+    - [src/actuator_config_tool/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/actuator_config_tool/main.cpp)
+  - it writes the selected runtime profile into `ActuatorConfig` and reports before/after state on CAN `0x5E0 + node_id`
+- Verified `VelocityOnly` profile write on hardware:
+  - uploaded `actuator_config_velocityonly_f446re`
+  - observed CAN `0x5E7` frames like `FA 01 01 01 00 02 01 00`
+  - this confirmed:
+    - stored config was loaded successfully
+    - config save succeeded
+    - previous profile was `As5600(1)`
+    - new profile is `VelocityOnly(0)`
+    - default control mode became `OutputVelocity(2)`
+- Fixed a build regression after adding the config utility:
+  - `custom_f446re` initially started linking `src/actuator_config_tool/main.cpp`
+  - this caused duplicate `setup()` / `loop()` definitions
+  - `platformio.ini` now excludes `actuator_config_tool/` from the main firmware build filter
+- Hardware-validated initial `VelocityOnly` runtime semantics in the main firmware:
+  - uploaded `custom_f446re` with the stored `VelocityOnly` profile
+  - observed `0x407` status frames carrying signed values rather than clamped `0..100%` position
+  - controlled CAN test on `0x207` showed interval-average status shifting by command polarity:
+    - idle average about `-0.72%`
+    - `+50%` command window average about `+4.06%`
+    - `-50%` command window average about `-5.47%`
+    - stop window average returned near zero
+- Added dedicated velocity CAN IDs while preserving the legacy mirror for compatibility:
+  - command: `0x210 + node_id`
+  - status: `0x410 + node_id`
+  - in `VelocityOnly`, firmware now accepts both:
+    - legacy gripper command ID `0x200 + node_id`
+    - dedicated velocity command ID `0x210 + node_id`
+  - in `VelocityOnly`, firmware now emits both:
+    - legacy mirror on `0x400 + node_id`
+    - dedicated velocity status on `0x410 + node_id`
+  - encoder-backed profiles keep using only the gripper IDs
+- Verified dedicated velocity CAN IDs on hardware:
+  - sent commands on `0x217`
+  - observed periodic signed velocity reports on `0x417`
+  - controlled test interval averages were:
+    - idle about `+0.45%`
+    - `+50%` command window about `+4.87%`
+    - `-50%` command window about `-2.88%`
+    - stop window about `+0.06%`
+  - also confirmed the legacy mirror remains active:
+    - `0x407` and `0x417` were emitting matching payloads during `VelocityOnly`
+- Verified explicit `TmagLut` profile selection on hardware without using the button flow:
+  - added and uploaded `actuator_config_tmag_f446re`
+  - observed CAN `0x5E7` frames like `FA 01 01 00 02 01 01 01`
+  - this confirmed:
+    - previous profile was `VelocityOnly(0)`
+    - new profile is `TmagLut(2)`
+    - default control mode returned to `OutputAngle(1)`
+    - both output-angle and velocity capabilities are enabled in the stored config
+- Verified main firmware boot behavior after storing `TmagLut`:
+  - uploaded `custom_f446re`
+  - observed periodic `0x407` traffic again with `0x0000` payload at boot
+  - observed no `0x417` traffic
+  - this is consistent with leaving `VelocityOnly` and returning to encoder-backed `% open` reporting semantics
+- Added a runtime diagnostic frame to the main firmware on CAN `0x5F0 + node_id`:
+  - payload marker: `0xFB`
+  - reports:
+    - stored `output_encoder_type`
+    - actual active encoder type after fallback selection
+    - default control mode
+    - enabled capability bits
+    - `g_need_calibration`
+    - whether an output encoder is required
+- Verified active runtime encoder selection on hardware in `TmagLut` mode:
+  - observed `0x5F7` frames like `FB 02 02 01 01 01 00 01`
+  - this confirmed:
+    - stored profile is `TmagLut(2)`
+    - active runtime encoder is also `TmagLut(2)`
+    - no runtime fallback to `As5600` occurred in this boot
+    - calibration was not currently blocking motion
+- Verified encoder-backed position semantics while `TmagLut` was active:
+  - with `0x207` commanding `50.00%`, `0x407` moved off boot zero
+  - controlled capture showed:
+    - idle average about `0.00%`
+    - command window average about `5.12%`
+    - peak observed about `9.30%`
+  - after returning command to `0%`, `0x407` began decaying back toward the open end
+- Updated repo documentation to match current firmware behavior:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+  - docs now describe:
+    - encoder-backed vs `VelocityOnly` CAN semantics
+    - dedicated velocity IDs `0x210/0x410 + node_id`
+    - legacy mirror behavior in `VelocityOnly`
+    - runtime diagnostic frame `0x5F0 + node_id`
+- Added a first end-user-facing manual for people unfamiliar with the firmware:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - it covers:
+    - what the firmware does
+    - the three output-encoder profiles
+    - recommended upload / CAN validation workflow
+    - profile switching by config firmware and by button
+    - `TMAG LUT` calibration flow
+    - practical CAN examples and troubleshooting
+- Verified builds after the latest runtime-selection change:
+  - `pio run -e custom_f446re`
+  - `pio run -e fram_test_f446re`
+  - `pio run -e tmag_calibration_runner_f446re`
+  - `pio run -e actuator_config_velocityonly_f446re`
+  - `pio run -e actuator_config_as5600_f446re`
+  - `pio run -e actuator_config_tmag_f446re`
+  - `pio run -e custom_f446re -t upload`
+
+## Current TMAG Status
+
+The previous TMAG SPI decode issue has already been fixed.
+
+Current conclusions from prior hardware work:
+
+- TMAG raw and scaled data are decoded correctly.
+- The TMAG internal angle-engine approach was not suitable for the current geometry.
+- The software LUT approach is the preferred direction.
+- The field likely contains mixed output-shaft `1x` and input-shaft harmonic content.
+- Despite that mixture, the LUT-based estimator was accurate enough in testing to justify integration work.
+
+Recent validated LUT result from the dedicated test firmware:
+
+- RMS error about `0.59 deg`
+- MAE about `0.50 deg`
+- max absolute error about `1.24 deg`
+- the previous branch-jump outlier was removed by restricting candidates using the input-shaft angle and gear ratio
+
+Latest implementation step completed:
+
+- removed the reflashing-based profile-change helper workflow from the repo:
+  - deleted the obsolete helper source:
+    - [src/actuator_config_tool/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/actuator_config_tool/main.cpp)
+  - removed the obsolete PlatformIO environments:
+    - `actuator_config_velocityonly_f446re`
+    - `actuator_config_as5600_f446re`
+    - `actuator_config_tmag_f446re`
+- cleaned the remaining `TMAG` calibration runner comment that still referenced old gripper semantics
+- updated the `TMAG` output-encoder report so it now reflects:
+  - the actuator-generic firmware direction
+  - CAN/FRAM-based runtime profile switching
+  - the added `DirectInput` path for `gear_ratio == 1:1`
+- verified the final intended firmware pair still builds clean after that cleanup:
+  - `pio run -e custom_f446re`
+  - `pio run -e tmag_calibration_runner_f446re`
+- re-uploaded `custom_f446re` to hardware and re-verified the cleaned runtime path:
+  - `can0` confirmed `UP` at `1 Mbps`
+  - upload through `ST-Link` succeeded
+  - periodic runtime frames were present after boot:
+    - `0x5F7` diag: `FB02020101010001`
+    - `0x407` output-angle status
+    - `0x417` output-velocity status
+  - the board is currently still running stored/active `TmagLut(2)`
+- issued small runtime commands on the new actuator-generic channels while `TmagLut` was active:
+  - angle command:
+    - `cansend can0 207#30750000` = `30.000 deg`
+  - velocity command:
+    - `cansend can0 217#60EA0000` = `60.000 deg/s`
+  - stop:
+    - `cansend can0 217#00000000`
+  - observed response summary:
+    - idle: angle about `0.681 deg`, velocity about `-0.097 deg/s`
+    - after `30 deg` angle command: angle status rose to about `1.131 deg`
+    - during `60 deg/s` velocity command: velocity status shifted positive and angle continued rising to about `1.413 deg`
+    - after stop: velocity returned near zero while angle settled around `1.43 deg`
+  - this is not yet a wide-range tracking validation, but it confirms the `deg` / `deg/s` runtime channels are still alive on hardware after the repo cleanup
+- found and fixed a larger architectural gap in the main runtime path:
+  - angle-mode outer-loop feedback and CAN `0x407/0x417` status had still been derived from motor-shaft multi-turn estimation,
+    not from the active output encoder
+  - added `OutputEncoderManager::read(OutputAngleSample&)`
+  - updated runtime control/status to use active output-encoder feedback when available
+  - `TMAG LUT` and `DirectInput` runtime `read()` paths now apply stored `zero_offset_rad`
+  - `readAbsoluteAngleRad()` remains the raw-absolute path for boot-reference and zero-capture flows
+- verified the output-encoder-feedback patch on hardware:
+  - `pio run -e custom_f446re` succeeded
+  - `pio run -e custom_f446re -t upload` succeeded
+  - after upload, `0x407` no longer behaved like the previous motor-derived near-static output estimate
+  - it now reports full absolute-angle movement/wrap consistent with active output-encoder reads
+- new hardware finding after that fix:
+  - with stored/active profile still `TmagLut(2)`, idle `0x407` output-angle status continuously swept through a large part of the `0..360 deg` range
+    while `0x417` stayed near zero most of the time
+  - this suggests the current `TMAG LUT` runtime estimator is not stable at rest in the main firmware path,
+    and that previous "quiet" status frames had been masking the problem because they were motor-derived
+- attempted to compare against `As5600` by sending profile-switch command `0x227#01`,
+  but the runtime diagnostic frame remained `FB02020101010001`
+  - likely interpretation:
+    - `As5600` is not currently selectable on this stored board state
+    - the main firmware stayed in `TmagLut`
+
+## Remaining Work
+
+The highest-priority remaining tasks are now:
+
+Latest implementation step in progress:
+
+- user requested a control-policy change:
+  - output-shaft encoders should be used only at boot / zero-capture time to establish the `0 deg` reference
+  - runtime FOC control and CAN angle/velocity status should go back to motor-side multi-turn estimation
+  - in other words:
+    - boot reference: output encoder may be used
+    - manual zero / calibration capture: output encoder may be used
+    - runtime closed-loop control: use input-encoder multi-turn path
+- code has been updated accordingly:
+  - removed the just-added runtime `OutputEncoderManager::read(...)` path from the main control/status flow
+  - `CanService::poll(...)` now again derives angle/velocity status from motor multi-turn state
+  - `main.cpp` again uses motor multi-turn output estimation for the position outer loop
+  - output encoders remain in the boot-reference and zero-offset capture paths only
+- verified this reverted runtime policy:
+  - `pio run -e custom_f446re` succeeded
+  - `pio run -e custom_f446re -t upload` succeeded
+  - runtime diagnostic frame remained:
+    - `0x5F7`: `FB02020101010001`
+  - idle CAN capture no longer showed the previous output-encoder-driven full-circle sweep
+  - `0x407` and `0x417` are again derived from motor-side multi-turn estimation
+  - observed idle sample range after upload:
+    - `0x407` around `43.7 deg -> 42.6 deg` over the short capture window
+    - `0x417` remained near zero with small noise only
+
+The highest-priority remaining tasks are now:
+
+Latest implementation step completed:
+
+- updated the user-facing docs to match the clarified control policy:
+  - output encoders are used only for boot zero alignment and explicit zero capture
+  - runtime FOC control and CAN `0x407/0x417` status are based on motor-side `AS5048A` multi-turn estimation
+- updated:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+- ran direct hardware validation on the clarified runtime policy and wrote a report:
+  - report:
+    - [docs/runtime_validation_report_2026-04-22.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22.md)
+  - identified and fixed two issues during validation:
+    - boot was auto-commanding `0 deg` instead of holding the current aligned position
+    - `0x417` velocity status was under-reported because the internal velocity sample state was updated even when `millis()` had not advanced
+  - final validation scope:
+    - boot consistency across two uploads after settle time
+    - idle stability
+    - streamed angle command response at `20 Hz`
+    - streamed velocity command response at `20 Hz`
+  - final key results:
+    - boot 1 and boot 2 angle status matched at about `38.672 deg`
+    - idle angle stayed stable within about `0.001 deg`
+    - angle command direction followed the streamed command sequence correctly
+    - streamed `60 deg/s` velocity command produced about `3.5 .. 3.6 deg/s` measured output velocity
+    - reported `0x417` velocity now matches angle-derived velocity closely
+  - final assessment in the report:
+    - runtime behavior now passes for correctness under the clarified policy
+    - remaining issue is performance / tuning rather than protocol correctness
+
+The highest-priority remaining tasks are now:
+
+1. Tune motor-side performance limits and gains so commanded output speed is closer to the requested setpoint.
+
+Latest implementation step completed:
+
+- user clarified the intended policy:
+  - velocity control should not care about angle limits
+  - only the angle-control path should use additional braking near configured output-angle limits
+- main firmware was updated accordingly:
+  - velocity mode no longer applies the software angle-limit clamp
+  - angle mode now owns the edge-braking behavior
+- after a subsequent regression attempt, the user reported another bench PSU OCP event that likely happened during an overly aggressive stop
+- in response, the angle-mode edge braking was softened further:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - new dedicated constant:
+    - `ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2 = 60.0f`
+  - this replaces the earlier edge-braking behavior that implicitly reused a much larger outer-loop acceleration budget
+- uploaded the softer angle-braking firmware successfully:
+  - `pio run -e custom_f446re -t upload`
+  - programming finished
+  - verify OK
+  - target reset completed
+- documented this follow-up change in:
+  - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+- tuned the main firmware motor velocity loop modestly:
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - updated:
+    - `motor.PID_velocity.P = 0.12`
+    - `motor.PID_velocity.I = 0.4`
+- reran a settled-window velocity sweep after the status-sampling fix and gain update:
+  - positive direction:
+    - `30 deg/s` settled average: about `30.125 deg/s`
+    - `40 deg/s` settled average: about `40.048 deg/s`
+    - `60 deg/s` settled average: about `59.985 deg/s`
+    - `100 deg/s` settled average: about `99.583 deg/s`
+  - `+150 / +200 deg/s` initially looked bad, but that run was taken while already near the positive travel edge
+    - angle stopped near `2305 deg`
+    - velocity collapsed toward zero
+    - interpretation:
+      - this was travel-limit clamp behavior, not immediate evidence of high-speed loop failure
+  - negative direction from the high-angle region:
+    - `-150 deg/s` settled average: about `-149.134 deg/s`
+    - `-200 deg/s` settled average: about `-197.477 deg/s`
+  - conclusion:
+    - with enough travel margin, the current firmware tracks accurately through at least `|200 deg/s|`
+- explicitly characterized positive edge-clamp behavior with a long `+200 deg/s` run:
+  - mid command window:
+    - velocity average about `197.827 deg/s`
+  - late command window:
+    - velocity average dropped to about `117.340 deg/s`
+    - last reported velocity in that window dropped to about `32.466 deg/s`
+  - post window:
+    - angle settled near `2412 deg`
+    - velocity decayed near zero
+  - interpretation:
+    - the soft travel clamp is working
+    - but the current implementation ramps commanded velocity down toward zero through the slew limiter rather than braking sharply
+    - so extra overshoot near the travel edge is expected
+- updated the corrected-ratio runtime report with:
+  - the gain change
+  - settled-window sweep results
+  - positive edge-clamp behavior
+  - explicit note that the earlier positive `150 / 200 deg/s` collapse was travel-limit clamp contamination
+  - file:
+    - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+- improved runtime velocity-status quality in [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp):
+  - `0x417` velocity is now derived at the CAN status transmit interval
+  - it is no longer based on very short loop-to-loop deltas
+- verified after upload with a longer `10 deg/s` controlled test:
+  - command-window full velocity average: about `7.845 deg/s`
+  - settled tail velocity average: about `9.410 deg/s`
+  - settled tail range: about `7.471 .. 10.767 deg/s`
+  - command-window angle increased from about `13.348 deg` to about `42.374 deg`
+  - this is a substantial improvement over the earlier noisy velocity-status result
+- updated the corrected-ratio runtime report with the new result:
+  - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+- fixed a newly discovered arm-time reference bug:
+  - after the first boot-safe arm/disarm implementation, simply sending `arm` still shifted the reported output angle by about `12 deg`
+  - root cause:
+    - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp) re-ran `refreshBootReference()` inside `armPowerStage()`
+  - fix:
+    - removed that re-alignment from the arm path
+  - verified after upload:
+    - pre-arm angle average: about `63.974 deg`
+    - armed angle average: about `63.977 deg`
+    - post-disarm angle average: about `63.975 deg`
+    - arm/disarm no longer shifts output reference
+- re-ran controlled low-risk motion checks with the corrected `8:1` firmware:
+  - small angle-step test:
+    - initial status: `63.979 deg`
+    - commanded target: `73.979 deg`
+    - post-window average: about `74.190 deg`
+    - result:
+      - angle command sign and magnitude now look consistent with the corrected ratio
+  - conservative velocity test:
+    - streamed `10 deg/s`
+    - angle increased from about `74.188 deg` to about `80.184 deg` during the command window
+    - reported velocity average during the command window: about `4.331 deg/s`
+    - result:
+      - positive velocity command now produces positive motion
+      - but achieved speed is still below the requested setpoint and velocity status remains noisy
+- widened the controlled validation sweep after the velocity-status fix:
+  - `+20 deg` angle-step test:
+    - initial status: `45.948 deg`
+    - commanded target: `65.948 deg`
+    - post-window average: about `66.350 deg`
+  - `20 deg/s` velocity test:
+    - settled tail velocity average: about `19.347 deg/s`
+    - settled tail angle increased from about `85.529 deg` to about `127.183 deg`
+  - result:
+    - the corrected-ratio firmware now looks coherent not only at the smallest setpoints but also at the current moderate validation point
+- wrote a corrected-ratio runtime validation report:
+  - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+- added a conservative slew limit for CAN `OutputVelocity` commands:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - new default:
+    - `ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 90.0f`
+  - effect:
+    - large velocity step commands are now ramped on the output side before conversion into motor-side velocity demand
+    - this reduces the risk of repeating the previous high-current step event when velocity mode is armed and commanded
+- extended runtime diagnostic reporting so CAN now exposes power-stage armed state:
+  - `0x5F0 + node_id`, byte `data[7]`
+    - bit0 = output feedback required
+    - bit1 = power stage armed
+- updated docs for:
+  - power-stage arm/disarm command
+  - runtime diagnostic bit layout
+  - velocity-command slew behavior
+  - files:
+    - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+    - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+    - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+    - [docs/power_stage_boot_safety_report_2026-04-22.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/power_stage_boot_safety_report_2026-04-22.md)
+- verified after these changes:
+  - `pio run -e custom_f446re` succeeded
+  - `pio run -e custom_f446re -t upload` succeeded
+  - post-upload CAN observation without any arm command showed:
+    - `0x5F7 = FB02020101010001`
+    - interpreted `data[7] = 0x01`
+    - therefore:
+      - output feedback required = `1`
+      - power stage armed = `0`
+  - this is the first direct CAN-side confirmation that the uploaded firmware is not auto-arming the power stage at boot
+  - explicit arm/disarm sequence was also verified over CAN:
+    - sent:
+      - `cansend can0 237#01`
+      - `cansend can0 237#00`
+    - observed runtime diag sequence:
+      - `FB02020101010001` -> armed `0`
+      - `FB02020101010003` -> armed `1`
+      - `FB02020101010001` -> armed `0`
+    - this confirms the new power-stage arm state transition is working as designed
+  - recorded the result in:
+    - [docs/power_stage_boot_safety_report_2026-04-22.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/power_stage_boot_safety_report_2026-04-22.md)
+
+- successfully uploaded the new boot-safe main firmware after target power was restored:
+  - command:
+    - `pio run -e custom_f446re -t upload`
+  - result:
+    - programming finished
+    - verify OK
+    - target reset completed
+- current expected behavior of the uploaded firmware:
+  - board boot initializes config/sensors/CAN
+  - power stage remains `disarmed` by default
+  - `PIN_EN_GATE` should stay low until explicit CAN arm command `0x230 + node_id`
+  - default node `7`:
+    - arm: `cansend can0 237#01`
+    - disarm: `cansend can0 237#00`
+
+- identified the likely reason the same over-current behavior could still appear on simple board power-up:
+  - the firmware documentation already said "`CAN enable` is required"
+  - but the actual main firmware still enabled `PIN_EN_GATE` and ran `initFOC()` automatically during boot
+  - so board power-up could still raise the power stage even before any explicit user command
+- implemented a boot-safe power-stage arming path in the main firmware:
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp)
+  - [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp)
+  - [include/can_service.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_service.h)
+  - [include/can_protocol.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_protocol.h)
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+- new behavior:
+  - boot initializes sensors, FRAM, CAN, config, and output-reference state
+  - boot leaves the power stage `disarmed`
+  - `PIN_EN_GATE` stays low by default
+  - `motor.init()` / `initFOC()` run only after an explicit CAN power-stage arm command
+  - new arm/disarm CAN command:
+    - `0x230 + node_id`
+    - default node `7` -> `0x237`
+    - `0x237#01` = arm
+    - `0x237#00` = disarm
+- updated docs for the new arm/disarm requirement:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+- verified after the change:
+  - `pio run -e custom_f446re` succeeded
+- attempted to upload the new boot-safe firmware, but the upload was blocked by target power state rather than build correctness:
+  - `pio run -e custom_f446re -t upload`
+  - failed with:
+    - `Error: target voltage may be too low for reliable debugging`
+    - `Error: init mode failed (unable to connect to the target)`
+
+- re-uploaded the main firmware only, per the current hardware safety constraint:
+  - command run:
+    - `pio run -e custom_f446re -t upload`
+  - result:
+    - programming finished
+    - verify OK
+    - target reset completed
+- this upload-only session was intentionally done without runtime motion validation because the user reported the previous firmware state could trip the power supply OCP on board power-up
+- current safety constraint for the next step:
+  - board can be powered for flashing
+  - motor three-phase leads remain disconnected during this session
+  - no motion/FOC behavior should be interpreted until the hardware is reconnected for a controlled validation run
+
+- corrected the live gear-ratio source of truth in firmware:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) now sets `GEAR_RATIO = 8.0f`
+  - removed the stale `CONFIRMED` wording that had been attached to the wrong `240.0f` value
+- added a targeted migration path for stale stored defaults:
+  - [include/config/actuator_defaults.h](/home/gyungminnoh/projects/NoFW/NoFW/include/config/actuator_defaults.h)
+  - [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp)
+  - if FRAM still contains the known stale default fingerprint
+    - `gear_ratio = 240.0f`
+    - `output_min_deg = 0.0f`
+    - `output_max_deg = 72.0f`
+  - firmware now migrates it to the current build defaults instead of continuing to run with the stale ratio
+- wired that migration into both firmware entry paths that load actuator config:
+  - main firmware:
+    - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - TMAG calibration runner:
+    - [src/tmag_calibration_runner/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/tmag_calibration_runner/main.cpp)
+- marked the existing runtime validation report as ratio-contaminated historical data:
+  - [docs/runtime_validation_report_2026-04-22.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22.md)
+  - absolute `deg` / `deg/s` magnitudes from that run are now explicitly documented as not trustworthy because the firmware still used the stale ratio during capture
+- verified after these fixes:
+  - `pio run -e custom_f446re` succeeded
+
+- audited the repo for additional code/documentation conflicts after the user corrected the real hardware ratio to `8:1`
+- additional conflicts found:
+  - stale "confirmed" label in [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h):
+    - it still says `Gear ratio (CONFIRMED)` while the value is the stale `240.0f`
+  - wrong derived travel range source:
+    - `ACTUATOR_OUTPUT_MAX_RAD` and `ACTUATOR_OUTPUT_MAX_DEG` are derived directly from the stale compile-time ratio
+    - so any default travel based on those values is also wrong until the ratio source is fixed
+  - stale validation report interpretation:
+    - [docs/runtime_validation_report_2026-04-22.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22.md) used firmware output values produced under the stale ratio
+    - directionality / protocol-path observations may still be useful
+    - absolute output angle and output speed magnitudes from that report are not trustworthy as real-world `deg` / `deg/s` conclusions
+  - stale historical notes inside this file:
+    - some older `agents.md` entries still mention `% open`, gripper semantics, or `VelocityOnly` percent semantics that no longer match the current code path
+    - one old note says `GEAR_RATIO <= 1:1` defaults to `VelocityOnly`, but current code in [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp) defaults `gear_ratio <= 1` to `DirectInput`
+    - some old notes mention legacy mirror CAN behavior in `VelocityOnly`, but current code in [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp) and [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp) now handles only the actuator-generic `deg` / `deg/s` command/status IDs
+- no new contradiction was found in the current primary documentation set for:
+  - CAN bitrate / node / IDs
+  - current `deg` / `deg/s` payload units
+  - timeout behavior
+  - output-encoder usage policy
+  - runtime status being based on motor-side multi-turn estimation
+- conclusion from the audit:
+  - the main live conflict is still the stale ratio source of truth
+  - the next most important cleanup is to mark the existing validation report as ratio-contaminated and regenerate it after the ratio fix
+
+- discovered a hard contradiction in stored project assumptions:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) still defines `GEAR_RATIO = 240.0f`
+  - this is what the firmware build currently uses for command/status scaling and limit conversion
+  - but the user has now explicitly clarified the real hardware ratio is `8:1`
+  - [agents.md](/home/gyungminnoh/projects/NoFW/NoFW/agents.md) itself also already described the actuator as `8:1`
+- this means the current firmware math, recent speed-limit reasoning, and parts of the validation interpretation are using the wrong mechanical ratio
+- root cause of the mistake:
+  - the implementation path trusted the compile-time constant in `board_config.h`
+  - the existing contradiction between code and project notes was not reconciled before continuing with tuning and hardware validation
+- this mismatch must be corrected before any further runtime tuning conclusions are trusted
+
+- started the first performance-tuning pass by raising the motor-side motion limits and wiring them through all three clamp points:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - [src/actuator_api.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/actuator_api.cpp)
+- introduced:
+  - `ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S = 320.0f`
+  - `ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2 = 2000.0f`
+- applied those limits consistently to:
+  - `motor.velocity_limit`
+  - outer position-loop `pvc.vel_limit`
+  - outer position-loop `pvc.accel_limit`
+  - output-velocity CAN clamp conversion inside `ActuatorAPI`
+- during the first high-speed streamed velocity validation, the bench power supply entered over-current protection and the session was stopped before a full log was captured
+- initial suspicion was that velocity mode travel protection was missing, but the user clarified there is no mechanical output end-stop in the current setup
+- the corrected most likely root cause is now:
+  - the first tuning pass raised the motor-side velocity limit from `20 rad/s` to `320 rad/s`
+  - with `GEAR_RATIO = 240`, a commanded `60 deg/s` output velocity becomes about `251 rad/s` on the motor side
+  - `OutputVelocity` mode applies that step directly, without any slew limiting
+  - the motor is running `MotionControlType::velocity` with `TorqueControlType::voltage`
+  - so the velocity PID can immediately demand a large phase voltage at low speed / near stall
+  - because there is no current limiting in the present configuration, that transient can draw enough supply current to trip the bench power supply OCP even without any mechanical end-stop
+- added a firmware-side safety fix in [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp):
+  - velocity mode now also clamps outward motion at `output_min_deg/output_max_deg`
+  - once the current estimated output angle is already at or beyond a travel edge, any further command in the outward direction is forced to `0 deg/s`
+- verified after this fix:
+  - `pio run -e custom_f446re` succeeded
+
+The highest-priority remaining tasks are now:
+
+1. Re-validate the softened angle-mode edge braking with a controlled edge-approach test before doing any more aggressive regression runs.
+2. Keep the boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, settled-window sweep, and edge-clamp characterization as regression checks.
+3. Only resume further performance tuning if operation beyond the currently validated `|200 deg/s|` range is required or if different edge behavior is desired.
+
+Latest implementation step completed:
+
+- rechecked the current main-loop policy in [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp):
+  - `OutputVelocity` mode now bypasses output-angle-limit braking entirely
+  - output encoders are used only for boot/alignment and explicit zero capture
+  - runtime FOC and CAN status continue to use motor-side `AS5048A` multi-turn estimation
+  - angle-control mode alone applies the softer edge-braking cap:
+    - `ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2 = 60.0f`
+- recorded the latest conservative post-softening validation result in
+  [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md):
+  - start angle before test: about `82.260 deg`
+  - commanded target: `0 deg`
+  - command-window angle moved from about `82.241 deg` to about `-0.497 deg`
+  - post-window average settled around `-0.060 deg`
+  - command-window average velocity was about `-48.670 deg/s`
+  - no new PSU OCP event was observed during this conservative run
+- cleaned up the corrected-ratio runtime report so it now distinguishes:
+  - historical positive-edge clamp behavior from an earlier revision
+  - current firmware policy where velocity mode ignores angle-limit braking
+  - the still-open need for broader angle-mode edge-braking validation
+
+The highest-priority remaining tasks are now:
+
+1. Re-validate the softened angle-mode edge braking from multiple starting distances near both configured travel limits, starting conservatively.
+2. If OCP can still be reproduced in angle mode, replace or further limit the current braking strategy rather than increasing aggressiveness.
+3. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+
+Latest implementation step completed:
+
+- added one more safety layer to the current `angle mode` stopping path:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+  - new constant:
+    - `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 60.0f`
+- reason for the change:
+  - the outer position loop already has an acceleration limit
+  - but the later edge-braking cap could still reduce the final velocity command abruptly near the travel edges
+  - that abrupt final-stage deceleration could create strong regenerative braking and contribute to PSU OCP
+- implementation effect:
+  - `OutputVelocity` mode is unchanged and still uses only its own velocity-command slew path
+  - `OutputAngle` mode now applies:
+    - outer position-loop shaping
+    - edge-braking speed cap
+    - final angle-mode velocity slew limiting before `motor.move(...)`
+  - this reduces sudden command reversals and deceleration spikes in the angle-control path
+- verification:
+  - `pio run -e custom_f446re` succeeded after the change
+- documentation updated:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/can_arch.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_arch.md)
+
+The highest-priority remaining tasks are now:
+
+1. Upload this safer angle-mode braking revision and re-validate near both configured travel limits, starting with conservative angle-to-zero checks.
+2. If OCP can still be reproduced in angle mode, lower or redesign the final angle-mode braking/slew strategy instead of making the stop sharper.
+3. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+
+Latest implementation step completed:
+
+- uploaded the safer angle-mode braking revision successfully:
+  - `pio run -e custom_f446re -t upload`
+  - programming finished
+  - verify OK
+  - target reset completed
+- confirmed the board came back on CAN after upload:
+  - `can0` is up at `1 Mbps`
+  - observed runtime diag:
+    - `0x5F7 = FB 02 02 01 01 01 00 01`
+  - interpretation:
+    - stored profile = `2` (`TmagLut`)
+    - active profile = `2` (`TmagLut`)
+    - velocity mode enabled = `1`
+    - angle mode enabled = `1`
+    - calibration required = `0`
+    - power stage armed bit = `0`
+- this confirms the new revision is running on the board and still boots in the expected disarmed state after reset
+
+The highest-priority remaining tasks are now:
+
+1. Re-validate the uploaded safer angle-mode braking revision near both configured travel limits, starting with conservative angle-to-zero checks.
+2. If OCP can still be reproduced in angle mode, lower or redesign the final angle-mode braking/slew strategy instead of making the stop sharper.
+3. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+
+Latest implementation step completed:
+
+- performed live lower-edge validation on the uploaded safer angle-mode braking revision with motor power applied
+- observed pre-test steady state:
+  - runtime diag stayed `0x5F7 = FB 02 02 01 01 01 00 01`
+  - power stage armed bit remained `0` until explicit arm
+  - output angle was stable near `165.2 deg`
+- ran three conservative `OutputAngle -> 0 deg` sequences over CAN with explicit arm/disarm:
+  1. first approach:
+     - about `165.234 deg -> 45.181 deg`
+     - no PSU OCP event
+  2. second approach:
+     - about `45.187 deg ->` minimum about `-3.315 deg`
+     - post-disarm settle about `3.41 deg`
+     - no PSU OCP event
+  3. final near-edge trim:
+     - about `3.422 deg ->` minimum about `-0.113 deg`
+     - post-disarm settle about `-0.09 deg`
+     - no PSU OCP event
+- result:
+  - the new angle-mode-only final slew limiter appears to have improved lower-edge settling without reproducing the earlier reported PSU OCP
+- updated the runtime validation report with these new lower-edge results:
+  - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+The highest-priority remaining tasks are now:
+
+1. Re-validate the uploaded safer angle-mode braking revision near the positive configured travel limit.
+2. If OCP can still be reproduced in angle mode, lower or redesign the final angle-mode braking/slew strategy instead of making the stop sharper.
+3. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+
+Latest implementation step completed:
+
+- completed conservative positive-edge validation on the uploaded safer angle-mode braking revision
+- method:
+  - started from the lower-edge region after the earlier `0 deg` settling checks
+  - streamed a large positive angle command:
+    - `0x207#404B4C00` (`5000.000 deg`)
+  - this lets firmware clamp internally to the stored `output_max_deg`
+  - used explicit arm/disarm around the run
+- observed result:
+  - start angle was about `-0.08 deg`
+  - angle rose continuously through the full travel
+  - peak observed angle was about `2173.9 deg`
+  - post-disarm settle remained near `2173.9 deg`
+  - no PSU OCP event was observed
+  - runtime diag returned to disarmed state after the explicit disarm command
+- combined result of the latest live validation session:
+  - lower-edge approach now settles to about `-0.09 deg` without PSU OCP
+  - positive-edge approach now reaches and settles near about `2173.9 deg` without PSU OCP
+- updated the runtime validation report with both the lower-edge and positive-edge results:
+  - [docs/runtime_validation_report_2026-04-22_ratio_corrected.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/runtime_validation_report_2026-04-22_ratio_corrected.md)
+
+The highest-priority remaining tasks are now:
+
+1. If tighter edge stopping is still required, tune or redesign the current angle-mode braking policy based on overshoot/settling targets rather than making it more aggressive blindly.
+2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+3. If needed later, compare upper-edge and lower-edge overshoot/settling symmetry with shorter-distance edge-approach tests.
+
+Latest implementation step completed:
+
+- updated the end-user firmware guide:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+- key documentation improvements:
+  - clarified that all application-facing commands are output-axis `deg` / `deg/s`
+  - clarified that angle commands are clamped to stored `output_min_deg/output_max_deg`
+  - added a safer first-motion sequence using:
+    - `0x237` arm
+    - a small `0x207` angle command
+    - `0x237` disarm
+  - clarified the current mode policy:
+    - velocity mode uses its own slew limit but no angle-edge braking
+    - angle mode uses edge braking plus a final slew-limited settle path
+  - clarified that stored/active profile means boot-time output-reference path selection, not runtime FOC feedback source
+  - added troubleshooting for:
+    - powered but still disarmed boards
+    - large angle commands being clamped by stored travel limits
+  - added a short bench-validated behavior summary:
+    - boot-safe disarmed startup
+    - explicit arm/disarm
+    - lower-edge settling near `-0.09 deg`
+    - positive-edge clamp/settle near about `2173.9 deg` on the current test unit
+
+The highest-priority remaining tasks are now:
+
+1. Keep user-facing docs aligned with the implemented CAN/profiling behavior as firmware changes continue.
+2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+3. If future control-policy changes are made, update both the user guide and runtime validation report in the same step.
+
+Latest implementation step completed:
+
+- created a dedicated manual test checklist for user-driven bench testing:
+  - [docs/manual_can_test_checklist.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/manual_can_test_checklist.md)
+- the new checklist covers:
+  - `can0` bring-up and runtime diag confirmation
+  - profile switching over `0x227`
+  - arm/disarm over `0x237`
+  - safe first-motion testing with a small angle command
+  - manual angle and velocity command examples
+  - large positive angle command testing to observe internal travel-limit clamp
+  - profile-specific expectations and failure cases
+  - quick emergency-disarm guidance
+
+The highest-priority remaining tasks are now:
+
+1. Keep the manual test checklist and user guide aligned with the implemented CAN/profiling behavior as firmware changes continue.
+2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+3. If future control-policy changes are made, update the manual checklist, user guide, and runtime validation report in the same step.
+
+## Important Constraints For Future Work
+
+- The actuator profile may vary by product:
+  - motor type may change
+  - gearbox may change
+  - gear ratio may change
+  - output encoder type may change
+- `TMAG LUT` candidate search must depend on the stored gear ratio.
+- Some actuators will use `AS5600` as the runtime output encoder.
+- Some actuators will use `TMAG LUT` as the runtime output encoder.
+- Some actuators may intentionally run without an output absolute encoder and allow only output-referenced velocity control.
+- Some TMAG-based calibration flows may still use `AS5600` as the calibration reference.
+- Output-absolute-angle validity is mandatory for output-angle motion, but not for `VelocityOnly` profiles.
+- Boot should not auto-enable motion; `CAN enable` is required.
+- If `can0` is down, the agent should first try to bring it up with `1 Mbps`.
+  In the current shell session this may still require elevated privilege.
+
 ## Remaining Diagnostic Firmware
 
 Only the following diagnostic environments are currently kept.
 
 - `fram_test_f446re`
   Validates FRAM read/write behavior and power-cycle retention.
+  It now also reports stored calibration-bundle presence on CAN `0x5D0 + node_id`.
 - `tmag_comm_test_f446re`
   Validates TMAG SPI communication and basic register access.
 - `tmag_sensor_test_f446re`
@@ -124,32 +1171,15 @@ Only the following diagnostic environments are currently kept.
   Streams live `TMAG5170` `X/Y/Z` and raw values while the user manually moves the mechanism.
 - `tmag_lut_angle_test_f446re`
   Evaluates output-angle estimation using `TMAG5170 XYZ -> LUT -> output angle`, referenced to `AS5600`.
+- `tmag_calibration_runner_f446re`
+  Learns `TMAG LUT` calibration on hardware and writes `TmagCalibrationData` into the FRAM calibration bundle.
+
+Runtime profile changes are now expected to happen through the main firmware over CAN and FRAM persistence, not by reflashing helper firmware.
 
 Default PlatformIO environment:
 
 - `pio run`
 - resolves to `custom_f446re`
-
-## Current TMAG Status
-
-The previous TMAG SPI decode issue has already been fixed.
-
-Current conclusions:
-
-- TMAG raw and scaled data are now being decoded correctly.
-- The TMAG internal angle-engine approach was not suitable for the current geometry.
-- The software LUT approach is the current preferred direction.
-
-Recent LUT-based validation outcome:
-
-- calibration RMS: about `1.86 deg`
-- validation RMS: about `1.39 deg`
-- validation MAE: about `0.51 deg`
-
-Working interpretation:
-
-- direct magnetic geometry is imperfect
-- but `TMAG5170` still carries enough repeatable information to estimate output angle in software
 
 ## Repository Hygiene Rules
 
@@ -167,4 +1197,3 @@ When working on hardware-related tasks in this repo, prefer this order:
 3. upload it if hardware is connected
 4. inspect `CAN` output with `candump`
 5. interpret the result before making additional firmware changes
-

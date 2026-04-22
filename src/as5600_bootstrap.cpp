@@ -81,16 +81,6 @@ static bool readAs5600AngleRadSamples_(int samples, int delay_ms, float& out_rad
   return true;
 }
 
-bool bootstrapOutputOffset(float& out_rad) {
-  // Setup-only usage: read once and treat it as "0 deg reference"
-  if (!readAs5600AngleRadSamples_(5, 2, out_rad)) {
-    return false;
-  }
-
-  // We return boot reading for bookkeeping; GripperAPI will treat this as 0 alignment.
-  return true;
-}
-
 bool readAs5600AngleRad(float& out_rad) {
   return readAs5600AngleRadSamples_(5, 2, out_rad);
 }

@@ -1,4 +1,8 @@
 #include "app.h"
+#include "actuator_api.h"
+#include "can_transport.h"
+#include "config/actuator_defaults.h"
+#include "config/calibration_constants.h"
 
 extern "C" void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {};
@@ -46,34 +50,196 @@ BLDCDriver3PWM driver(PIN_PWM_A, PIN_PWM_B, PIN_PWM_C);
 
 MultiTurnEstimator mt;
 PositionVelocityController pvc;
+ActuatorConfig actuator_config;
+OutputEncoderManager output_encoder_manager;
+static bool g_power_stage_armed = false;
+static float g_applied_output_velocity_deg_s = 0.0f;
+static uint32_t g_last_velocity_cmd_ms = 0;
+static float g_applied_angle_mode_output_velocity_deg_s = 0.0f;
+static uint32_t g_last_angle_mode_cmd_ms = 0;
 
 namespace {
-constexpr uint32_t kCalMagic = 0x43414C32; // "CAL2"
-constexpr uint16_t kCalAddr = 0;
 constexpr uint16_t kCalPressMs = 1000;
 constexpr uint16_t kClearPressMs = 3000;
 constexpr uint16_t kManualZeroPressMs = 5000;
-struct CalData {
-  uint32_t magic;
-  int8_t sensor_dir;
-  float zero_elec;
-  float as5600_zero_ref;
-};
+constexpr uint16_t kRuntimeDiagCanIdBase = 0x5F0;
+constexpr uint32_t kRuntimeDiagPeriodMs = 500;
+bool g_need_calibration = false;
 
-bool loadCalibration(CalData& out) {
-  if (!FM25CL64B::readObject(kCalAddr, out)) return false;
-  if (out.magic != kCalMagic) return false;
-  if (out.sensor_dir != 1 && out.sensor_dir != -1) return false;
+void clearCalibrationData() {
+  ConfigStore::clearCalibrationBundleCompat();
+}
+
+bool outputEncoderRequired(const ActuatorConfig& config) {
+  return config.output_encoder_type != OutputEncoderType::VelocityOnly;
+}
+
+bool isOutputProfileSelectable(const ConfigStore::CalibrationBundle& bundle,
+                               OutputEncoderType profile) {
+  switch (profile) {
+    case OutputEncoderType::VelocityOnly:
+      return true;
+    case OutputEncoderType::DirectInput:
+      return isDirectInputCompatible(actuator_config);
+    case OutputEncoderType::As5600:
+      return bundle.as5600.valid;
+    case OutputEncoderType::TmagLut:
+      return bundle.tmag.valid;
+  }
+  return false;
+}
+
+bool hasRequiredOutputCalibration(const ConfigStore::CalibrationBundle& bundle,
+                                  const ActuatorConfig& config) {
+  switch (config.output_encoder_type) {
+    case OutputEncoderType::VelocityOnly:
+      return true;
+    case OutputEncoderType::DirectInput:
+      return true;
+    case OutputEncoderType::As5600:
+      return bundle.as5600.valid;
+    case OutputEncoderType::TmagLut:
+      return bundle.tmag.valid;
+  }
+  return false;
+}
+
+bool hasRequiredMotionCalibration(const ConfigStore::CalibrationBundle& bundle,
+                                  const ActuatorConfig& config) {
+  return bundle.foc.valid && hasRequiredOutputCalibration(bundle, config);
+}
+
+bool readOutputEncoderAbsolute(float& out_angle_rad);
+
+uint16_t runtimeDiagCanId() {
+  return kRuntimeDiagCanIdBase + actuator_config.can_node_id;
+}
+
+OutputEncoderType activeOutputEncoderType() {
+  const IOutputEncoder* active_encoder = output_encoder_manager.active();
+  if (active_encoder == nullptr) {
+    return OutputEncoderType::VelocityOnly;
+  }
+  return active_encoder->type();
+}
+
+void sendRuntimeDiagIfDue() {
+  static uint32_t last_diag_ms = 0;
+  const uint32_t now_ms = millis();
+  if ((uint32_t)(now_ms - last_diag_ms) < kRuntimeDiagPeriodMs) {
+    return;
+  }
+  last_diag_ms = now_ms;
+
+  uint8_t data[8] = {0};
+  data[0] = 0xFB;
+  data[1] = static_cast<uint8_t>(actuator_config.output_encoder_type);
+  data[2] = static_cast<uint8_t>(activeOutputEncoderType());
+  data[3] = static_cast<uint8_t>(actuator_config.default_control_mode);
+  data[4] = actuator_config.enable_velocity_mode ? 1 : 0;
+  data[5] = actuator_config.enable_output_angle_mode ? 1 : 0;
+  data[6] = g_need_calibration ? 1 : 0;
+  data[7] = 0;
+  if (outputEncoderRequired(actuator_config)) {
+    data[7] |= 0x01;
+  }
+  if (g_power_stage_armed) {
+    data[7] |= 0x02;
+  }
+  CanTransport::sendStd(runtimeDiagCanId(), data, 8);
+}
+
+void refreshBootReference() {
+  sensor.update();
+  const float raw = sensor.getAngle();
+  mt.reset(raw);
+
+  float output_boot_rad = 0.0f;
+  if (outputEncoderRequired(actuator_config) && readOutputEncoderAbsolute(output_boot_rad)) {
+    ActuatorAPI::setBootReference(mt.mt_angle, output_boot_rad);
+  } else {
+    ActuatorAPI::setBootReferenceFromMotor(mt.mt_angle);
+  }
+  // Do not command motion automatically at boot. Hold the current aligned output position
+  // until the first explicit angle/velocity command arrives.
+  ActuatorAPI::target_output_deg = ActuatorAPI::motorMTToOutputRawDeg(mt.mt_angle);
+  ActuatorAPI::target_output_velocity_deg_s = 0.0f;
+}
+
+bool selectOutputProfile(OutputEncoderType profile) {
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  if (!isOutputProfileSelectable(calibration_bundle, profile)) {
+    return false;
+  }
+
+  applyOutputProfileDefaults(actuator_config, profile);
+  if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    return false;
+  }
+
+  CanService::init(actuator_config);
+  ActuatorAPI::configure(actuator_config);
+  output_encoder_manager.configure(
+      actuator_config,
+      calibration_bundle.direct_input.valid ? &calibration_bundle.direct_input : nullptr,
+      calibration_bundle.as5600.valid ? &calibration_bundle.as5600 : nullptr,
+      calibration_bundle.tmag.valid ? &calibration_bundle.tmag : nullptr,
+      &sensor);
+  g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
+  refreshBootReference();
   return true;
 }
 
-void saveCalibration(const CalData& in) {
-  FM25CL64B::writeObject(kCalAddr, in);
+bool cycleOutputProfile() {
+  constexpr OutputEncoderType kProfiles[] = {
+      OutputEncoderType::VelocityOnly,
+      OutputEncoderType::DirectInput,
+      OutputEncoderType::As5600,
+      OutputEncoderType::TmagLut,
+  };
+
+  int current_idx = 0;
+  for (size_t i = 0; i < (sizeof(kProfiles) / sizeof(kProfiles[0])); ++i) {
+    if (kProfiles[i] == actuator_config.output_encoder_type) {
+      current_idx = static_cast<int>(i);
+      break;
+    }
+  }
+
+  for (size_t step = 1; step <= (sizeof(kProfiles) / sizeof(kProfiles[0])); ++step) {
+    const int idx = (current_idx + static_cast<int>(step)) %
+                    static_cast<int>(sizeof(kProfiles) / sizeof(kProfiles[0]));
+    if (selectOutputProfile(kProfiles[idx])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
-void clearCalibration() {
-  const uint32_t empty_magic = 0;
-  FM25CL64B::writeObject(kCalAddr, empty_magic);
+void configureOutputEncoder(const ConfigStore::CalibrationBundle& bundle) {
+  if (!ConfigStore::loadActuatorConfig(actuator_config)) {
+    actuator_config = buildLegacyActuatorConfig();
+    ConfigStore::saveActuatorConfig(actuator_config);
+  } else if (migrateStaleActuatorConfigDefaults(actuator_config)) {
+    ConfigStore::saveActuatorConfig(actuator_config);
+  }
+  ActuatorAPI::configure(actuator_config);
+  output_encoder_manager.configure(
+      actuator_config,
+      bundle.direct_input.valid ? &bundle.direct_input : nullptr,
+      bundle.as5600.valid ? &bundle.as5600 : nullptr,
+      bundle.tmag.valid ? &bundle.tmag : nullptr,
+      &sensor);
+}
+
+bool readOutputEncoderAbsolute(float& out_angle_rad) {
+  return output_encoder_manager.readAbsoluteAngleRad(out_angle_rad);
+}
+
+void updateOutputEncoderZeroOffset(float zero_rad) {
+  output_encoder_manager.updateZeroOffset(zero_rad, kCalibrationRecordMagic);
 }
 
 enum class ButtonAction {
@@ -133,6 +299,167 @@ static void motorBeepDouble() {
   motorBeep();
 }
 
+static void resetVelocityCommandRamp() {
+  g_applied_output_velocity_deg_s = 0.0f;
+  g_last_velocity_cmd_ms = millis();
+}
+
+static void resetAngleModeCommandRamp() {
+  g_applied_angle_mode_output_velocity_deg_s = 0.0f;
+  g_last_angle_mode_cmd_ms = millis();
+}
+
+static float slewOutputVelocityCommand(float target_output_velocity_deg_s) {
+  const uint32_t now_ms = millis();
+  float dt_s = 0.0f;
+  if (g_last_velocity_cmd_ms != 0 && now_ms >= g_last_velocity_cmd_ms) {
+    dt_s = static_cast<float>(now_ms - g_last_velocity_cmd_ms) * 0.001f;
+  }
+  g_last_velocity_cmd_ms = now_ms;
+
+  if (dt_s <= 0.0f) {
+    return g_applied_output_velocity_deg_s;
+  }
+
+  const float max_delta = ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 * dt_s;
+  const float delta = target_output_velocity_deg_s - g_applied_output_velocity_deg_s;
+  if (delta > max_delta) {
+    g_applied_output_velocity_deg_s += max_delta;
+  } else if (delta < -max_delta) {
+    g_applied_output_velocity_deg_s -= max_delta;
+  } else {
+    g_applied_output_velocity_deg_s = target_output_velocity_deg_s;
+  }
+  return g_applied_output_velocity_deg_s;
+}
+
+static float slewAngleModeVelocityCommand(float target_motor_velocity_cmd) {
+  const float target_output_velocity_deg_s =
+      ActuatorAPI::motorVelocityToOutputVelocityDegPerSec(target_motor_velocity_cmd);
+
+  const uint32_t now_ms = millis();
+  float dt_s = 0.0f;
+  if (g_last_angle_mode_cmd_ms != 0 && now_ms >= g_last_angle_mode_cmd_ms) {
+    dt_s = static_cast<float>(now_ms - g_last_angle_mode_cmd_ms) * 0.001f;
+  }
+  g_last_angle_mode_cmd_ms = now_ms;
+
+  if (dt_s <= 0.0f) {
+    return ActuatorAPI::outputVelocityDegPerSecToMotorVelocity(
+        g_applied_angle_mode_output_velocity_deg_s);
+  }
+
+  const float max_delta = ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 * dt_s;
+  const float delta =
+      target_output_velocity_deg_s - g_applied_angle_mode_output_velocity_deg_s;
+  if (delta > max_delta) {
+    g_applied_angle_mode_output_velocity_deg_s += max_delta;
+  } else if (delta < -max_delta) {
+    g_applied_angle_mode_output_velocity_deg_s -= max_delta;
+  } else {
+    g_applied_angle_mode_output_velocity_deg_s = target_output_velocity_deg_s;
+  }
+
+  return ActuatorAPI::outputVelocityDegPerSecToMotorVelocity(
+      g_applied_angle_mode_output_velocity_deg_s);
+}
+
+static float applyAngleModeEdgeBraking(float motor_velocity_cmd,
+                                       float current_output_raw_rad,
+                                       float output_min_rad,
+                                       float output_max_rad) {
+  const float output_velocity_deg_s =
+      ActuatorAPI::motorVelocityToOutputVelocityDegPerSec(motor_velocity_cmd);
+  if (fabsf(output_velocity_deg_s) <= 0.0f) {
+    return motor_velocity_cmd;
+  }
+
+  float remaining_rad = 0.0f;
+  if (output_velocity_deg_s > 0.0f) {
+    remaining_rad = output_max_rad - current_output_raw_rad;
+  } else {
+    remaining_rad = current_output_raw_rad - output_min_rad;
+  }
+
+  if (remaining_rad <= 0.0f) {
+    return 0.0f;
+  }
+
+  const float remaining_deg = remaining_rad * (180.0f / PI);
+  const float output_accel_deg_s2 = ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2;
+  if (output_accel_deg_s2 <= 0.0f) {
+    return motor_velocity_cmd;
+  }
+
+  // Kinematic braking cap: v^2 <= 2 a d
+  const float max_output_speed_deg_s = sqrtf(2.0f * output_accel_deg_s2 * remaining_deg);
+  if (fabsf(output_velocity_deg_s) <= max_output_speed_deg_s) {
+    return motor_velocity_cmd;
+  }
+
+  const float capped_output_velocity_deg_s =
+      (output_velocity_deg_s > 0.0f) ? max_output_speed_deg_s : -max_output_speed_deg_s;
+  return ActuatorAPI::outputVelocityDegPerSecToMotorVelocity(capped_output_velocity_deg_s);
+}
+
+static void disarmPowerStage() {
+  motor.disable();
+  digitalWrite(PIN_EN_GATE, LOW);
+  ActuatorAPI::target_output_velocity_deg_s = 0.0f;
+  resetVelocityCommandRamp();
+  resetAngleModeCommandRamp();
+  g_power_stage_armed = false;
+}
+
+static bool armPowerStage() {
+  if (g_power_stage_armed) {
+    return true;
+  }
+
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  if (calibration_bundle.foc.valid) {
+    motor.sensor_direction = (Direction)calibration_bundle.foc.sensor_direction;
+    motor.zero_electric_angle = calibration_bundle.foc.zero_electrical_angle;
+  }
+
+  digitalWrite(PIN_EN_GATE, HIGH);
+  delay(10);
+
+  motor.init();
+  const int foc_ok = motor.initFOC();
+  if (!foc_ok) {
+    disarmPowerStage();
+    g_need_calibration = true;
+    return false;
+  }
+
+  if (!calibration_bundle.foc.valid) {
+    calibration_bundle.foc = {};
+    calibration_bundle.foc.magic = kCalibrationRecordMagic;
+    calibration_bundle.foc.sensor_direction = (int8_t)motor.sensor_direction;
+    calibration_bundle.foc.zero_electrical_angle = motor.zero_electric_angle;
+    calibration_bundle.foc.valid = true;
+    ConfigStore::saveCalibrationBundleCompat(calibration_bundle);
+  }
+
+  if (actuator_config.output_encoder_type == OutputEncoderType::As5600 &&
+      !calibration_bundle.as5600.valid) {
+    calibration_bundle.as5600 = {};
+    calibration_bundle.as5600.magic = kCalibrationRecordMagic;
+    calibration_bundle.as5600.zero_offset_rad = ActuatorAPI::output_zero_ref_rad;
+    calibration_bundle.as5600.invert = false;
+    calibration_bundle.as5600.valid = true;
+    ConfigStore::saveCalibrationBundleCompat(calibration_bundle);
+  }
+
+  g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
+  resetVelocityCommandRamp();
+  resetAngleModeCommandRamp();
+  g_power_stage_armed = true;
+  return true;
+}
+
 static void initSystem() {
   // ---------- DRV8302 strap pins ----------
   pinMode(PIN_EN_GATE, OUTPUT);
@@ -164,7 +491,14 @@ static void initSystem() {
   // Read later (after FOC init) so AS5600 and motor MT are aligned in time.
 
   // ---------- CAN ----------
-  CanService::init();
+  if (!ConfigStore::loadActuatorConfig(actuator_config)) {
+    actuator_config = buildLegacyActuatorConfig();
+    ConfigStore::saveActuatorConfig(actuator_config);
+  } else if (migrateStaleActuatorConfigDefaults(actuator_config)) {
+    ConfigStore::saveActuatorConfig(actuator_config);
+  }
+  ActuatorAPI::configure(actuator_config);
+  CanService::init(actuator_config);
 
   // ---------- Driver ----------
   driver.voltage_power_supply = BUS_VOLTAGE;   // 40.0V
@@ -182,60 +516,51 @@ static void initSystem() {
   motor.voltage_sensor_align = ALIGN_VOLTAGE;
   motor.voltage_limit        = (TORQUE_LIMIT_VOLTS < VOLTAGE_LIMIT) ? TORQUE_LIMIT_VOLTS : VOLTAGE_LIMIT;
 
-  motor.PID_velocity.P = 0.1;
-  motor.PID_velocity.I = 0.2;
+  motor.PID_velocity.P = 0.12;
+  motor.PID_velocity.I = 0.4;
   motor.PID_velocity.D = 0.0;
   motor.LPF_velocity.Tf = 0.007;
+  motor.velocity_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
 
   // ---------- Calibration gate ----------
   pinMode(PIN_USER_BTN, INPUT_PULLUP);
-  CalData cal = {};
-  const bool have_cal = loadCalibration(cal);
-  if (have_cal) {
-    motor.sensor_direction = (Direction)cal.sensor_dir;
-    motor.zero_electric_angle = cal.zero_elec;
-    GripperAPI::as5600_zero_ref_rad = cal.as5600_zero_ref;
-  } else {
-    GripperAPI::as5600_zero_ref_rad = 0.0f;
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  const bool have_cal = hasRequiredMotionCalibration(calibration_bundle, actuator_config);
+  if (calibration_bundle.foc.valid) {
+    motor.sensor_direction = (Direction)calibration_bundle.foc.sensor_direction;
+    motor.zero_electric_angle = calibration_bundle.foc.zero_electrical_angle;
   }
-
-  // Enable gate
-  digitalWrite(PIN_EN_GATE, HIGH);
-  delay(10);
-
-  // Init & FOC
-  motor.init();
-  int foc_ok = motor.initFOC();
-  if (foc_ok && !have_cal) {
-    CalData out = {};
-    out.magic = kCalMagic;
-    out.sensor_dir = (int8_t)motor.sensor_direction;
-    out.zero_elec = motor.zero_electric_angle;
-    out.as5600_zero_ref = GripperAPI::as5600_zero_ref_rad;
-    saveCalibration(out);
-    motorBeep();
+  switch (actuator_config.output_encoder_type) {
+    case OutputEncoderType::VelocityOnly:
+      ActuatorAPI::output_zero_ref_rad = 0.0f;
+      break;
+    case OutputEncoderType::DirectInput:
+      ActuatorAPI::output_zero_ref_rad =
+          calibration_bundle.direct_input.valid ? calibration_bundle.direct_input.zero_offset_rad
+                                                : 0.0f;
+      break;
+    case OutputEncoderType::As5600:
+      ActuatorAPI::output_zero_ref_rad =
+          calibration_bundle.as5600.valid ? calibration_bundle.as5600.zero_offset_rad : 0.0f;
+      break;
+    case OutputEncoderType::TmagLut:
+      ActuatorAPI::output_zero_ref_rad =
+          calibration_bundle.tmag.valid ? calibration_bundle.tmag.zero_offset_rad : 0.0f;
+      break;
   }
+  configureOutputEncoder(calibration_bundle);
 
-  // Multi-turn reset at current raw motor angle
-  float raw0 = sensor.getAngle();
-  mt.reset(raw0);
-
-  // Read AS5600 now (after FOC init) so it matches current motor MT.
-  float as5600_boot_rad = 0.0f;
-  if (!bootstrapOutputOffset(as5600_boot_rad)) {
-    as5600_boot_rad = GripperAPI::as5600_zero_ref_rad;
-  }
-
-  // Define boot reference:
-  // output 0 rad is AS5600 absolute zero (motor_zero_mt aligned accordingly)
-  GripperAPI::setBootReference(mt.mt_angle, as5600_boot_rad);
-  // Set target output to "open" at boot
-  GripperAPI::target_open_percent = GRIP_BOOT_OPEN_PERCENT;
+  g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
+  refreshBootReference();
+  resetVelocityCommandRamp();
+  resetAngleModeCommandRamp();
+  disarmPowerStage();
 
   // Outer loop gains (tune)
   pvc.Kp = 20.0f;
-  pvc.vel_limit = 20.0f;
-  pvc.accel_limit = 0.5f;
+  pvc.vel_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
+  pvc.accel_limit = ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2;
   pvc.reset();
 }
 
@@ -246,21 +571,97 @@ void setup() {
 void loop() {
   static bool calibrating = false;
   static bool manual_zero_mode = false;
-  static bool need_calibration = false;
   static uint32_t suppress_actions_until_ms = 0;
   ButtonAction action = updateLongPress(digitalRead(PIN_USER_BTN) == LOW);
   if (millis() < suppress_actions_until_ms) {
     action = ButtonAction::None;
   }
+
+  sendRuntimeDiagIfDue();
+
+  if (!g_power_stage_armed) {
+    sensor.update();
+    const float raw = sensor.getAngle();
+    const float pos_mt = mt.update(raw);
+    CanService::poll(pos_mt);
+
+    OutputEncoderType requested_profile = OutputEncoderType::As5600;
+    if (CanService::takePendingOutputProfileChange(requested_profile)) {
+      selectOutputProfile(requested_profile);
+      return;
+    }
+
+    bool power_stage_enable = false;
+    if (CanService::takePendingPowerStageEnable(power_stage_enable) && power_stage_enable) {
+      armPowerStage();
+    }
+    return;
+  }
+
+  if (manual_zero_mode) {
+    if (action == ButtonAction::ManualZeroMode) {
+      motor.enable();
+      manual_zero_mode = false;
+      motorBeepDouble();
+      return;
+    }
+
+    if (action == ButtonAction::ClearStorage) {
+      if (cycleOutputProfile()) {
+        motorBeep();
+      }
+      return;
+    }
+
+    if (action == ButtonAction::Calibrate) {
+      if (!outputEncoderRequired(actuator_config)) {
+        motor.enable();
+        manual_zero_mode = false;
+        return;
+      }
+      float zero_rad = 0.0f;
+      if (readOutputEncoderAbsolute(zero_rad)) {
+        ActuatorAPI::output_zero_ref_rad = zero_rad;
+        updateOutputEncoderZeroOffset(zero_rad);
+        ConfigStore::CalibrationBundle calibration_bundle = {};
+        ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+        calibration_bundle.foc.magic = kCalibrationRecordMagic;
+        calibration_bundle.foc.sensor_direction = (int8_t)motor.sensor_direction;
+        calibration_bundle.foc.zero_electrical_angle = motor.zero_electric_angle;
+        calibration_bundle.foc.valid = true;
+        if (output_encoder_manager.active() != nullptr &&
+            output_encoder_manager.active()->type() == OutputEncoderType::TmagLut) {
+          calibration_bundle.tmag = output_encoder_manager.tmagCalibration();
+          calibration_bundle.tmag.magic = kCalibrationRecordMagic;
+        } else if (output_encoder_manager.active() != nullptr &&
+                   output_encoder_manager.active()->type() == OutputEncoderType::DirectInput) {
+          calibration_bundle.direct_input = output_encoder_manager.directInputCalibration();
+          calibration_bundle.direct_input.magic = kCalibrationRecordMagic;
+        } else {
+          calibration_bundle.as5600 = output_encoder_manager.as5600Calibration();
+          calibration_bundle.as5600.magic = kCalibrationRecordMagic;
+        }
+        ConfigStore::saveCalibrationBundleCompat(calibration_bundle);
+
+        refreshBootReference();
+        motor.enable();
+        motorBeepDouble();
+        manual_zero_mode = false;
+      }
+    }
+    return;
+  }
+
   if (action == ButtonAction::ManualZeroMode && !calibrating) {
     manual_zero_mode = true;
     motor.disable();
     motorBeep();
   }
   if (action == ButtonAction::ClearStorage && !calibrating) {
-    clearCalibration();
+    clearCalibrationData();
     motorBeepDouble();
-    need_calibration = true;
+    ConfigStore::CalibrationBundle calibration_bundle = {};
+    g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
     motor.disable();
     suppress_actions_until_ms = millis() + 1500;
   }
@@ -274,56 +675,34 @@ void loop() {
     motor.zero_electric_angle = NOT_SET;
     motor.init();
     int foc_ok = motor.initFOC();
-    if (foc_ok) {
-      CalData out = {};
-      out.magic = kCalMagic;
-      out.sensor_dir = (int8_t)motor.sensor_direction;
-      out.zero_elec = motor.zero_electric_angle;
-      out.as5600_zero_ref = GripperAPI::as5600_zero_ref_rad;
-      saveCalibration(out);
+  if (foc_ok) {
+      ConfigStore::CalibrationBundle calibration_bundle = {};
+      ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+      calibration_bundle.foc.magic = kCalibrationRecordMagic;
+      calibration_bundle.foc.sensor_direction = (int8_t)motor.sensor_direction;
+      calibration_bundle.foc.zero_electrical_angle = motor.zero_electric_angle;
+      calibration_bundle.foc.valid = true;
+      if (actuator_config.output_encoder_type == OutputEncoderType::DirectInput) {
+        calibration_bundle.direct_input.magic = kCalibrationRecordMagic;
+        calibration_bundle.direct_input.zero_offset_rad = ActuatorAPI::output_zero_ref_rad;
+        calibration_bundle.direct_input.valid = true;
+      } else if (actuator_config.output_encoder_type == OutputEncoderType::As5600) {
+        calibration_bundle.as5600.magic = kCalibrationRecordMagic;
+        calibration_bundle.as5600.zero_offset_rad = ActuatorAPI::output_zero_ref_rad;
+        calibration_bundle.as5600.invert = false;
+        calibration_bundle.as5600.valid = true;
+      }
+      ConfigStore::saveCalibrationBundleCompat(calibration_bundle);
       motorBeepDouble();
-      need_calibration = false;
+      g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
     }
 
-    sensor.update();
-    float raw = sensor.getAngle();
-    mt.reset(raw);
-    float as5600_boot_rad = 0.0f;
-    if (!bootstrapOutputOffset(as5600_boot_rad)) {
-      as5600_boot_rad = GripperAPI::as5600_zero_ref_rad;
-    }
-    GripperAPI::setBootReference(mt.mt_angle, as5600_boot_rad);
-    GripperAPI::target_open_percent = GRIP_BOOT_OPEN_PERCENT;
+    refreshBootReference();
 
     calibrating = false;
   }
 
-  if (manual_zero_mode) {
-    if (action == ButtonAction::Calibrate) {
-      float zero_rad = 0.0f;
-      if (readAs5600AngleRad(zero_rad)) {
-        GripperAPI::as5600_zero_ref_rad = zero_rad;
-        CalData out = {};
-        out.magic = kCalMagic;
-        out.sensor_dir = (int8_t)motor.sensor_direction;
-        out.zero_elec = motor.zero_electric_angle;
-        out.as5600_zero_ref = zero_rad;
-        saveCalibration(out);
-
-        sensor.update();
-        float raw = sensor.getAngle();
-        mt.reset(raw);
-        GripperAPI::setBootReference(mt.mt_angle, zero_rad);
-        GripperAPI::target_open_percent = GRIP_BOOT_OPEN_PERCENT;
-        motor.enable();
-        motorBeepDouble();
-        manual_zero_mode = false;
-      }
-    }
-    return;
-  }
-
-  if (calibrating || need_calibration) {
+  if (calibrating || g_need_calibration) {
     return;
   }
 
@@ -335,24 +714,59 @@ void loop() {
   float raw = sensor.getAngle();
   float pos_mt = mt.update(raw);
 
-  // CAN polling (timeout policy: HOLD-CURRENT)
+  // CAN polling and runtime status are based on motor-side multi-turn estimation.
+  // Output encoders are used only during boot/alignment and explicit zero capture.
   CanService::poll(pos_mt);
 
+  OutputEncoderType requested_profile = OutputEncoderType::As5600;
+  if (CanService::takePendingOutputProfileChange(requested_profile)) {
+    selectOutputProfile(requested_profile);
+    return;
+  }
+
+  bool power_stage_enable = false;
+  if (CanService::takePendingPowerStageEnable(power_stage_enable)) {
+    if (!power_stage_enable) {
+      disarmPowerStage();
+      return;
+    }
+  }
+
+  if (ActuatorAPI::active_control_mode == ControlMode::OutputVelocity) {
+    float target_output_velocity_deg_s = ActuatorAPI::target_output_velocity_deg_s;
+    const float slewed_output_velocity_deg_s =
+        slewOutputVelocityCommand(target_output_velocity_deg_s);
+    resetAngleModeCommandRamp();
+    const float motor_velocity_cmd =
+        ActuatorAPI::outputVelocityDegPerSecToMotorVelocity(
+            slewed_output_velocity_deg_s);
+    motor.move(motor_velocity_cmd);
+    return;
+  }
+
+  resetVelocityCommandRamp();
+
   // Output target (boot-centered) -> motor multi-turn target
-  float target_output_abs = GripperAPI::getTargetOutputAbsRad();
-  float current_output_raw = GripperAPI::motorMTToOutputRawRad(pos_mt);
+  float target_output_abs = ActuatorAPI::getTargetOutputAbsRad();
+  float current_output_raw = ActuatorAPI::motorMTToOutputRawRad(pos_mt);
 
   // Hard limit: never command further outside the allowed range.
-  if (current_output_raw > GRIP_OUTPUT_MAX_RAD && target_output_abs > current_output_raw) {
+  const float output_max_rad = actuator_config.output_max_deg * (PI / 180.0f);
+  const float output_min_rad = actuator_config.output_min_deg * (PI / 180.0f);
+  if (current_output_raw > output_max_rad && target_output_abs > current_output_raw) {
     target_output_abs = current_output_raw;
-  } else if (current_output_raw < 0.0f && target_output_abs < current_output_raw) {
+  } else if (current_output_raw < output_min_rad &&
+             target_output_abs < current_output_raw) {
     target_output_abs = current_output_raw;
   }
 
-  float motor_target_mt = GripperAPI::outputToMotorMT(target_output_abs, pos_mt);
+  float motor_target_mt =
+      ActuatorAPI::outputDegToMotorMT(target_output_abs * (180.0f / PI), pos_mt);
 
   // Outer position -> inner velocity command
   float vel_cmd = pvc.compute(motor_target_mt, pos_mt);
+  vel_cmd = applyAngleModeEdgeBraking(vel_cmd, current_output_raw, output_min_rad, output_max_rad);
+  vel_cmd = slewAngleModeVelocityCommand(vel_cmd);
 
   // Apply velocity command
   motor.move(vel_cmd);
