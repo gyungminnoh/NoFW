@@ -1139,6 +1139,23 @@ The highest-priority remaining tasks are now:
 2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
 3. If future control-policy changes are made, update the manual checklist, user guide, and runtime validation report in the same step.
 
+Latest implementation step completed:
+
+- committed the current actuator-firmware refactor and documentation set locally:
+  - commit: `1c0385c`
+  - message: `Refactor actuator firmware and add validation docs`
+- pushed the commit to GitHub:
+  - remote: `origin`
+  - branch: `main`
+- verified that local `HEAD` and `origin/main` now match:
+  - `1c0385ce61d01f4f858ea67f3834d97d8a4ebf0d`
+
+The highest-priority remaining tasks are now:
+
+1. Continue keeping the manual checklist, user guide, and validation reports aligned with firmware behavior as new changes are made.
+2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+3. If future control-policy changes are made, update the implementation-facing docs and user-facing docs in the same step.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
