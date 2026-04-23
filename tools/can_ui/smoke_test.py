@@ -67,6 +67,7 @@ class SmokeTest:
         state = self.wait_live_diag()
         self.check("server has live diag", True)
         self.check("link alive", state.get("link_alive") is True)
+        self.check("starts disarmed", state.get("diag", {}).get("armed") is False)
 
         status, body = request_json(self.base_url, "/api/power", {"armed": False})
         self.check(
@@ -76,13 +77,38 @@ class SmokeTest:
         status, body = request_json(self.base_url, "/api/stop_stream", {})
         self.check("stop stream endpoint", status == 200 and body.get("ok") is True)
 
+        live_limits = state.get("limits", {})
+        live_config = state.get("config", {})
+        status, body = request_json(
+            self.base_url,
+            "/api/actuator_limits",
+            {
+                "output_min_deg": live_limits.get("output_min_deg", 0.0),
+                "output_max_deg": live_limits.get("output_max_deg", 1.0),
+            },
+        )
+        self.check(
+            "actuator limits endpoint accepts current limits while disarmed",
+            status == 200 and body.get("ok") is True,
+        )
+        status, body = request_json(
+            self.base_url,
+            "/api/gear_ratio",
+            {"gear_ratio": live_config.get("gear_ratio", 1.0)},
+        )
+        self.check(
+            "gear ratio endpoint accepts current ratio while disarmed",
+            status == 200 and body.get("ok") is True,
+        )
+
         status, html = request_json(self.base_url, "/")
         self.check("index served", status == 200)
-        self.check("index references app v5", "/static/app.js?v=5" in html)
-        self.check("index references styles v5", "/static/styles.css?v=5" in html)
+        self.check("index references app v6", "/static/app.js?v=6" in html)
+        self.check("index references styles v6", "/static/styles.css?v=6" in html)
         self.check("index exposes output min", "outputMinStatus" in html)
         self.check("index exposes gear ratio", "gearRatioStatus" in html)
         self.check("index exposes current range warning", "currentRangeFeedback" in html)
+        self.check("index exposes config controls", "saveLimitsBtn" in html)
 
         invalid_cases = [
             (
@@ -132,6 +158,18 @@ class SmokeTest:
                 "/api/session",
                 {"can_iface": "can0", "node_id": 128},
                 "between 0 and 127",
+            ),
+            (
+                "reject inverted actuator limits",
+                "/api/actuator_limits",
+                {"output_min_deg": 10, "output_max_deg": 0},
+                "output_max_deg must be greater",
+            ),
+            (
+                "reject invalid gear ratio",
+                "/api/gear_ratio",
+                {"gear_ratio": 0},
+                "gear_ratio must be between",
             ),
         ]
         for name, path, payload, expected_error in invalid_cases:

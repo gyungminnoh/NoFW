@@ -36,6 +36,14 @@ uint16_t powerStageCmdCanId(uint8_t node_id) {
   return CAN_ID_POWER_STAGE_CMD_BASE + node_id;
 }
 
+uint16_t actuatorLimitsConfigCmdCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_LIMITS_CONFIG_CMD_BASE + node_id;
+}
+
+uint16_t actuatorGearConfigCmdCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_GEAR_CONFIG_CMD_BASE + node_id;
+}
+
 namespace {
 
 bool decodeInt32MUnits_(const uint8_t data[8], uint8_t len, float& out_value) {
@@ -127,6 +135,42 @@ bool encodeActuatorConfigStatus_OptionA(float gear_ratio,
   data[7] = 0;
   out_len = 8;
   return true;
+}
+
+bool decodeActuatorLimitsConfigCmd_OptionA(const uint8_t data[8],
+                                           uint8_t len,
+                                           float& out_output_min_deg,
+                                           float& out_output_max_deg) {
+  if (len < 8) return false;
+  if (!decodeInt32MUnits_(data, 4, out_output_min_deg)) {
+    return false;
+  }
+
+  uint8_t max_data[8] = {0};
+  max_data[0] = data[4];
+  max_data[1] = data[5];
+  max_data[2] = data[6];
+  max_data[3] = data[7];
+  return decodeInt32MUnits_(max_data, 4, out_output_max_deg);
+}
+
+bool encodeActuatorLimitsConfigCmd_OptionA(float output_min_deg,
+                                           float output_max_deg,
+                                           uint8_t data[8],
+                                           uint8_t& out_len) {
+  return encodeActuatorLimitsStatus_OptionA(output_min_deg, output_max_deg, data, out_len);
+}
+
+bool decodeActuatorGearConfigCmd_OptionA(const uint8_t data[8],
+                                         uint8_t len,
+                                         float& out_gear_ratio) {
+  return decodeInt32MUnits_(data, len, out_gear_ratio);
+}
+
+bool encodeActuatorGearConfigCmd_OptionA(float gear_ratio,
+                                         uint8_t data[8],
+                                         uint8_t& out_len) {
+  return encodeInt32MUnits_(gear_ratio, data, out_len);
 }
 
 bool decodeOutputProfileCmd_OptionA(const uint8_t data[8],

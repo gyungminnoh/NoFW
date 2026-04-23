@@ -1696,6 +1696,73 @@ The highest-priority remaining tasks are now:
 2. For future manual motion tests, use the visible travel limits to avoid silent clamp cases before judging PID behavior.
 3. Decide whether `output_min_deg/output_max_deg` should be reset around the current boot zero before continuing wide-range angle tests on this physical setup.
 
+Latest implementation step completed:
+
+- added actuator config CAN command paths in main firmware:
+  - `0x240 + node_id` for `output_min_deg/output_max_deg`
+  - `0x250 + node_id` for `gear_ratio`
+- added protocol codec support for these new frames:
+  - [include/can_protocol.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_protocol.h)
+  - [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp)
+- added pending command plumbing in CAN service:
+  - [include/can_service.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_service.h)
+  - [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp)
+- main firmware safety/apply policy:
+  - config commands are applied only while `disarmed`
+  - armed loop drains but ignores profile/config change commands
+  - limits require `max > min` and finite bounded values
+  - gear ratio requires finite bounded value and rejects `DirectInput` when ratio is not `1:1`
+  - `TmagLut` calibration validity now also checks learned ratio vs current config ratio
+- runtime reconfiguration path added so config changes are persisted to FRAM and reapplied without reflashing
+- web UI now supports actuator config editing:
+  - new panel for min/max limits and gear ratio
+  - save buttons enabled only while disarmed
+  - explicit disarmed requirement feedback messages
+  - new backend endpoints:
+    - `/api/actuator_limits`
+    - `/api/gear_ratio`
+- static assets bumped to `v6`
+- expanded automated verification:
+  - `tools/can_ui/smoke_test.py` now checks:
+    - successful disarmed saves for limits/gear
+    - invalid limit and invalid gear input rejections
+    - presence of new UI controls
+  - latest smoke test result: `30/30` pass
+- added UI-side post-save confirmation:
+  - limits save waits until live `0x427` matches the requested min/max
+  - gear save waits until live `0x437` matches the requested gear ratio
+  - save buttons show pending state while confirmation is in progress
+- fixed the UI backend disarm cache so a successful disarm request immediately allows config saves without waiting for the next `0x5F7`
+- manual online verification performed:
+  - sent `/api/actuator_limits` and `/api/gear_ratio` with current live values
+  - confirmed TX log includes `0x247` and `0x257`
+  - confirmed post-state remains link alive, profile `As5600`, `armed=false`, stream off
+- found a firmware-side issue after manual config save:
+  - runtime config/profile changes were calling `CanService::init()`
+  - this can reinitialize CAN hardware while already running and stop later status TX
+  - fixed by adding `CanService::configure()` for runtime policy updates without restarting CAN hardware
+- current upload status:
+  - `pio run -e custom_f446re` passes
+  - `python3 -m py_compile tools/can_ui/server.py tools/can_ui/smoke_test.py` passes
+  - `node --check tools/can_ui/static/app.js` passes
+  - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `30/30` before the CAN reinit fix
+  - upload of the CAN reinit fix is currently blocked by ST-Link/OpenOCD:
+    - `target voltage may be too low for reliable debugging`
+    - `unable to connect to the target`
+  - this likely requires checking board target power or ST-Link connection before hardware verification can continue
+- updated docs:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+  - [docs/manual_can_test_checklist.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/manual_can_test_checklist.md)
+
+The highest-priority remaining tasks are now:
+
+1. Restore board target power / ST-Link target-voltage detection, then upload the current firmware with the CAN reinit fix.
+2. After upload, rerun `python3 tools/can_ui/smoke_test.py --use-running-server` and verify live CAN remains alive after `/api/actuator_limits` and `/api/gear_ratio`.
+3. Decide whether to auto-fallback profile when gear-ratio changes invalidate the currently stored profile, or to keep current reject-only behavior.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

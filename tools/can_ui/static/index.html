@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NoFW CAN Test UI</title>
-    <link rel="stylesheet" href="/static/styles.css?v=5" />
+    <link rel="stylesheet" href="/static/styles.css?v=6" />
   </head>
   <body>
     <main class="layout">
@@ -48,6 +48,27 @@
             <button id="armBtn" class="primary">Arm</button>
             <button id="disarmBtn" class="danger">Disarm</button>
           </div>
+        </div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Actuator Limits</h2>
+          <label>Output Min Deg <input id="outputMinInput" type="number" step="0.001" value="0" /></label>
+          <label>Output Max Deg <input id="outputMaxInput" type="number" step="0.001" value="2160" /></label>
+          <div class="button-row">
+            <button id="loadConfigBtn">Load Live Config</button>
+            <button id="saveLimitsBtn" class="primary">Save Limits</button>
+          </div>
+          <p id="limitsConfigFeedback" class="feedback muted">Disarm is required before saving limits.</p>
+        </div>
+        <div>
+          <h2>Gear Ratio</h2>
+          <label>Motor:Output Ratio <input id="gearRatioInput" type="number" step="0.001" value="8" /></label>
+          <button id="saveGearRatioBtn" class="primary">Save Gear Ratio</button>
+          <p id="gearConfigFeedback" class="feedback muted">
+            Gear ratio changes reinitialize the output coordinate; use only while disarmed.
+          </p>
         </div>
       </section>
 
@@ -134,6 +155,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=6"></script>
   </body>
   </html>

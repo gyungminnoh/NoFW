@@ -41,6 +41,8 @@ LINK_ALIVE_WINDOW_S = 1.5
 MAX_STD_CAN_ID = 0x7FF
 MAX_CLASSIC_CAN_DLC = 8
 MAX_COMMAND_ABS_VALUE = 1_000_000.0
+MIN_GEAR_RATIO = 0.001
+MAX_GEAR_RATIO = 1000.0
 DISARM_REPEAT_COUNT = 3
 DISARM_REPEAT_DELAY_S = 0.02
 
@@ -90,6 +92,23 @@ def ensure_finite_command_value(value: Any, unit: str) -> float:
     if abs(parsed) > MAX_COMMAND_ABS_VALUE:
         raise ValueError(f"{unit} command magnitude must be <= {MAX_COMMAND_ABS_VALUE:g}")
     return parsed
+
+
+def ensure_travel_limits(min_deg: Any, max_deg: Any) -> tuple[float, float]:
+    parsed_min = ensure_finite_command_value(min_deg, "output_min_deg")
+    parsed_max = ensure_finite_command_value(max_deg, "output_max_deg")
+    if parsed_max <= parsed_min:
+        raise ValueError("output_max_deg must be greater than output_min_deg")
+    return parsed_min, parsed_max
+
+
+def ensure_gear_ratio(value: Any) -> float:
+    gear_ratio = ensure_finite_command_value(value, "gear_ratio")
+    if gear_ratio < MIN_GEAR_RATIO or gear_ratio > MAX_GEAR_RATIO:
+        raise ValueError(
+            f"gear_ratio must be between {MIN_GEAR_RATIO:g} and {MAX_GEAR_RATIO:g}"
+        )
+    return gear_ratio
 
 
 @dataclass
@@ -338,6 +357,18 @@ class CanUiBridge:
             return (f"{frame_id(0x220, cfg.node_id):03X}", f"{profile_code:02X}")
         if frame_type == "power":
             return (f"{frame_id(0x230, cfg.node_id):03X}", "01" if value else "00")
+        if frame_type == "actuator_limits":
+            output_min_deg, output_max_deg = value
+            return (
+                f"{frame_id(0x240, cfg.node_id):03X}",
+                encode_milli_units(float(output_min_deg))
+                + encode_milli_units(float(output_max_deg)),
+            )
+        if frame_type == "actuator_gear":
+            return (
+                f"{frame_id(0x250, cfg.node_id):03X}",
+                encode_milli_units(float(value)),
+            )
         raise ValueError(f"unsupported frame type: {frame_type}")
 
     def _send_frame(self, can_id_hex: str, payload_hex: str) -> None:
@@ -394,9 +425,42 @@ class CanUiBridge:
                 self.send_one_shot("power", False)
                 if idx + 1 < DISARM_REPEAT_COUNT:
                     time.sleep(DISARM_REPEAT_DELAY_S)
+            with self._lock:
+                self._latest_diag["armed"] = False
             return
 
         self.send_one_shot("power", True)
+
+    def _require_disarmed(self, operation: str) -> None:
+        with self._lock:
+            armed = bool(self._latest_diag.get("armed"))
+        if armed:
+            raise RuntimeError(f"{operation} is allowed only while disarmed")
+
+    def set_actuator_limits(self, output_min_deg: float, output_max_deg: float) -> None:
+        output_min_deg, output_max_deg = ensure_travel_limits(
+            output_min_deg, output_max_deg
+        )
+        self._require_disarmed("actuator limit config")
+        with self._lock:
+            self._command_mode = None
+            self._command_value = 0.0
+            self._stream_enabled = False
+        self.send_one_shot("actuator_limits", (output_min_deg, output_max_deg))
+        self.log(
+            "info",
+            f"Requested actuator limits = {output_min_deg:.3f} .. {output_max_deg:.3f} deg",
+        )
+
+    def set_actuator_gear_ratio(self, gear_ratio: float) -> None:
+        gear_ratio = ensure_gear_ratio(gear_ratio)
+        self._require_disarmed("gear ratio config")
+        with self._lock:
+            self._command_mode = None
+            self._command_value = 0.0
+            self._stream_enabled = False
+        self.send_one_shot("actuator_gear", gear_ratio)
+        self.log("info", f"Requested gear ratio = {gear_ratio:.3f}:1")
 
     def set_angle_target(self, angle_deg: float) -> None:
         angle_deg = ensure_finite_command_value(angle_deg, "angle")
@@ -524,6 +588,12 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/power":
             self.bridge.set_power(body["armed"])
+            return {"ok": True}
+        if path == "/api/actuator_limits":
+            self.bridge.set_actuator_limits(body["output_min_deg"], body["output_max_deg"])
+            return {"ok": True}
+        if path == "/api/gear_ratio":
+            self.bridge.set_actuator_gear_ratio(body["gear_ratio"])
             return {"ok": True}
         if path == "/api/angle":
             self.bridge.set_angle_target(float(body["deg"]))

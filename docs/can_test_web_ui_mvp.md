@@ -22,6 +22,8 @@
 
 - `0x220 + node_id` profile 변경
 - `0x230 + node_id` arm/disarm
+- `0x240 + node_id` actuator travel limits 설정
+- `0x250 + node_id` actuator gear ratio 설정
 - `0x200 + node_id` angle command
 - `0x210 + node_id` velocity command
 - `0x400 + node_id` angle status
@@ -32,8 +34,6 @@
 
 제외:
 
-- `output_min_deg`, `output_max_deg` 변경
-- `gear_ratio` 변경
 - zero save / calibration clear 같은 고급 설정
 - FRAM 설정 편집기
 
@@ -84,6 +84,8 @@
   - `DirectInput`
 - `arm`
 - `disarm`
+- actuator limit 입력 + FRAM 저장
+- gear ratio 입력 + FRAM 저장
 - angle 입력 + 송신
 - velocity 입력 + 송신
 - `Hold current angle`
@@ -100,6 +102,7 @@
   - 현재 profile이 angle mode를 허용하지 않으면 angle 관련 버튼은 disabled
   - travel limit을 알고 있고 target이 범위 밖이면 angle command 버튼은 disabled
   - 현재 profile이 velocity mode를 허용하지 않으면 velocity 관련 버튼은 disabled
+  - actuator limit / gear ratio 저장 버튼은 disarmed 상태에서만 enabled
   - link가 죽어 있으면 대부분의 제어 버튼은 disabled
 
 버튼 시각 정책:
@@ -137,6 +140,7 @@
 - UI는 사용자가 마지막으로 보낸 target을 계속 재전송하고 있음을 화면에 보여줘야 한다
 - 큰 command를 보내기 전에 작은 command로 방향 확인을 권장해야 한다
 - runtime diag에서 `armed` bit를 명시적으로 보여줘야 한다
+- actuator config 저장은 active stream을 정지하고 disarmed 상태에서만 수행해야 한다
 
 ## 구현 위치
 

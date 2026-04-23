@@ -14,6 +14,8 @@ namespace CanProtocol {
   uint16_t actuatorConfigStatusCanId(uint8_t node_id);
   uint16_t outputProfileCmdCanId(uint8_t node_id);
   uint16_t powerStageCmdCanId(uint8_t node_id);
+  uint16_t actuatorLimitsConfigCmdCanId(uint8_t node_id);
+  uint16_t actuatorGearConfigCmdCanId(uint8_t node_id);
 
   bool decodeOutputAngleDeg_OptionA(const uint8_t data[8], uint8_t len, float& out_angle_deg);
   bool encodeOutputAngleDeg_OptionA(float angle_deg, uint8_t data[8], uint8_t& out_len);
@@ -34,6 +36,20 @@ namespace CanProtocol {
                                           bool enable_output_angle_mode,
                                           uint8_t data[8],
                                           uint8_t& out_len);
+  bool decodeActuatorLimitsConfigCmd_OptionA(const uint8_t data[8],
+                                             uint8_t len,
+                                             float& out_output_min_deg,
+                                             float& out_output_max_deg);
+  bool encodeActuatorLimitsConfigCmd_OptionA(float output_min_deg,
+                                             float output_max_deg,
+                                             uint8_t data[8],
+                                             uint8_t& out_len);
+  bool decodeActuatorGearConfigCmd_OptionA(const uint8_t data[8],
+                                           uint8_t len,
+                                           float& out_gear_ratio);
+  bool encodeActuatorGearConfigCmd_OptionA(float gear_ratio,
+                                           uint8_t data[8],
+                                           uint8_t& out_len);
   bool decodeOutputProfileCmd_OptionA(const uint8_t data[8],
                                       uint8_t len,
                                       OutputEncoderType& out_profile);

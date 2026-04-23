@@ -33,6 +33,8 @@
 - actuator config 상태 TX: `0x430 + node_id`
 - 출력 프로파일 변경 RX: `0x220 + node_id`
 - power-stage arm/disarm RX: `0x230 + node_id`
+- actuator travel limit 설정 RX: `0x240 + node_id`
+- actuator gear ratio 설정 RX: `0x250 + node_id`
 - 런타임 진단 TX: `0x5F0 + node_id`
 
 기본 `node_id = 7`이면:
@@ -45,6 +47,8 @@
 - actuator config status = `0x437`
 - profile cmd = `0x227`
 - power-stage cmd = `0x237`
+- actuator limits config cmd = `0x247`
+- actuator gear config cmd = `0x257`
 - runtime diag = `0x5F7`
 
 ## Numeric Encoding
@@ -236,6 +240,63 @@ cansend can0 237#01
 # disarm
 cansend can0 237#00
 ```
+
+## Actuator Limits Config Command
+
+- ID: `0x240 + node_id`
+- DLC: `8`
+- 의미: `output_min_deg`, `output_max_deg`를 `FRAM`에 저장하고 런타임 설정에 적용
+- 적용 조건: power stage가 `disarmed` 상태일 때만 적용
+
+Payload:
+
+- `data[0..3] = output_min_deg`
+- `data[4..7] = output_max_deg`
+
+각 값은 `int32 mdeg` little-endian이다.
+
+제약:
+
+- 두 값은 finite number여야 한다
+- `abs(value) <= 1,000,000 deg`
+- `output_max_deg > output_min_deg`
+
+예시:
+
+```bash
+# 0 .. 2160 deg
+cansend can0 247#0000000080F52000
+```
+
+적용 후에는 `0x427`에서 저장/적용된 값을 확인한다.
+
+## Actuator Gear Ratio Config Command
+
+- ID: `0x250 + node_id`
+- DLC: `4`
+- 의미: gear ratio를 `FRAM`에 저장하고 출력축 좌표계를 재초기화
+- 적용 조건: power stage가 `disarmed` 상태일 때만 적용
+
+Payload:
+
+- `data[0..3] = gear_ratio`
+- 인코딩: `int32`, scale `0.001`
+
+제약:
+
+- `0.001 <= gear_ratio <= 1000.000`
+- 현재 profile이 `DirectInput`이면 `gear_ratio == 1.000`일 때만 적용 가능
+
+gear ratio 변경은 출력축 좌표계 해석을 바꾸므로, 적용 시 펌웨어는 boot reference를 다시 잡고 current-angle hold 상태로 돌아간다.
+
+예시:
+
+```bash
+# 8.000:1
+cansend can0 257#401F0000
+```
+
+적용 후에는 `0x437`에서 저장/적용된 gear ratio를 확인한다.
 
 ## Runtime Diagnostic
 

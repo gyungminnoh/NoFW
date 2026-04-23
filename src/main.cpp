@@ -5,6 +5,8 @@
 #include "config/actuator_defaults.h"
 #include "config/calibration_constants.h"
 
+#include <math.h>
+
 extern "C" void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {};
@@ -59,12 +61,18 @@ static uint32_t g_last_velocity_cmd_ms = 0;
 static float g_applied_angle_mode_output_velocity_deg_s = 0.0f;
 static uint32_t g_last_angle_mode_cmd_ms = 0;
 
+static void resetVelocityCommandRamp();
+static void resetAngleModeCommandRamp();
+
 namespace {
 constexpr uint16_t kCalPressMs = 1000;
 constexpr uint16_t kClearPressMs = 3000;
 constexpr uint16_t kManualZeroPressMs = 5000;
 constexpr uint16_t kRuntimeDiagCanIdBase = 0x5F0;
 constexpr uint32_t kRuntimeDiagPeriodMs = 500;
+constexpr float kMinGearRatio = 0.001f;
+constexpr float kMaxGearRatio = 1000.0f;
+constexpr float kMaxConfigAbsDeg = 1000000.0f;
 bool g_need_calibration = false;
 
 void clearCalibrationData() {
@@ -100,7 +108,8 @@ bool hasRequiredOutputCalibration(const ConfigStore::CalibrationBundle& bundle,
     case OutputEncoderType::As5600:
       return bundle.as5600.valid;
     case OutputEncoderType::TmagLut:
-      return bundle.tmag.valid;
+      return bundle.tmag.valid &&
+             fabsf(bundle.tmag.learned_gear_ratio - config.gear_ratio) <= 0.001f;
   }
   return false;
 }
@@ -111,6 +120,19 @@ bool hasRequiredMotionCalibration(const ConfigStore::CalibrationBundle& bundle,
 }
 
 bool readOutputEncoderAbsolute(float& out_angle_rad);
+
+bool validTravelLimits(float output_min_deg, float output_max_deg) {
+  return isfinite(output_min_deg) && isfinite(output_max_deg) &&
+         fabsf(output_min_deg) <= kMaxConfigAbsDeg &&
+         fabsf(output_max_deg) <= kMaxConfigAbsDeg &&
+         output_max_deg > output_min_deg;
+}
+
+bool validGearRatio(float gear_ratio) {
+  return isfinite(gear_ratio) &&
+         gear_ratio >= kMinGearRatio &&
+         gear_ratio <= kMaxGearRatio;
+}
 
 bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle) {
   float angle_rad = 0.0f;
@@ -237,6 +259,70 @@ void refreshBootReference() {
   ActuatorAPI::target_output_velocity_deg_s = 0.0f;
 }
 
+void reconfigureRuntimeAfterActuatorConfigChange(float current_motor_mt_rad,
+                                                 bool refresh_boot_reference) {
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+
+  CanService::configure(actuator_config);
+  ActuatorAPI::configure(actuator_config);
+  output_encoder_manager.configure(
+      actuator_config,
+      calibration_bundle.direct_input.valid ? &calibration_bundle.direct_input : nullptr,
+      calibration_bundle.as5600.valid ? &calibration_bundle.as5600 : nullptr,
+      calibration_bundle.tmag.valid ? &calibration_bundle.tmag : nullptr,
+      &sensor);
+  g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
+
+  if (refresh_boot_reference) {
+    refreshBootReference();
+  } else {
+    ActuatorAPI::target_output_deg =
+        ActuatorAPI::motorMTToOutputRawDeg(current_motor_mt_rad);
+    ActuatorAPI::target_output_velocity_deg_s = 0.0f;
+  }
+  resetVelocityCommandRamp();
+  resetAngleModeCommandRamp();
+}
+
+bool applyActuatorLimitsConfig(float output_min_deg,
+                               float output_max_deg,
+                               float current_motor_mt_rad) {
+  if (g_power_stage_armed || !validTravelLimits(output_min_deg, output_max_deg)) {
+    return false;
+  }
+
+  actuator_config.output_min_deg = output_min_deg;
+  actuator_config.output_max_deg = output_max_deg;
+  if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    return false;
+  }
+
+  reconfigureRuntimeAfterActuatorConfigChange(current_motor_mt_rad, false);
+  return true;
+}
+
+bool applyActuatorGearConfig(float gear_ratio, float current_motor_mt_rad) {
+  if (g_power_stage_armed || !validGearRatio(gear_ratio)) {
+    return false;
+  }
+
+  ActuatorConfig next_config = actuator_config;
+  next_config.gear_ratio = gear_ratio;
+  if (next_config.output_encoder_type == OutputEncoderType::DirectInput &&
+      !isDirectInputCompatible(next_config)) {
+    return false;
+  }
+
+  actuator_config = next_config;
+  if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    return false;
+  }
+
+  reconfigureRuntimeAfterActuatorConfigChange(current_motor_mt_rad, true);
+  return true;
+}
+
 bool selectOutputProfile(OutputEncoderType profile) {
   ConfigStore::CalibrationBundle calibration_bundle = {};
   ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
@@ -253,7 +339,7 @@ bool selectOutputProfile(OutputEncoderType profile) {
     return false;
   }
 
-  CanService::init(actuator_config);
+  CanService::configure(actuator_config);
   ActuatorAPI::configure(actuator_config);
   applyOutputZeroReferenceForProfile(calibration_bundle, profile);
   output_encoder_manager.configure(
@@ -667,6 +753,20 @@ void loop() {
       return;
     }
 
+    float requested_output_min_deg = 0.0f;
+    float requested_output_max_deg = 0.0f;
+    if (CanService::takePendingActuatorLimitsConfig(
+            requested_output_min_deg, requested_output_max_deg)) {
+      applyActuatorLimitsConfig(requested_output_min_deg, requested_output_max_deg, pos_mt);
+      return;
+    }
+
+    float requested_gear_ratio = 1.0f;
+    if (CanService::takePendingActuatorGearConfig(requested_gear_ratio)) {
+      applyActuatorGearConfig(requested_gear_ratio, pos_mt);
+      return;
+    }
+
     bool power_stage_enable = false;
     if (CanService::takePendingPowerStageEnable(power_stage_enable) && power_stage_enable) {
       armPowerStage();
@@ -794,18 +894,29 @@ void loop() {
   // Output encoders are used only during boot/alignment and explicit zero capture.
   CanService::poll(pos_mt);
 
-  OutputEncoderType requested_profile = OutputEncoderType::As5600;
-  if (CanService::takePendingOutputProfileChange(requested_profile)) {
-    selectOutputProfile(requested_profile);
-    return;
-  }
-
   bool power_stage_enable = false;
   if (CanService::takePendingPowerStageEnable(power_stage_enable)) {
     if (!power_stage_enable) {
       disarmPowerStage();
       return;
     }
+  }
+
+  OutputEncoderType requested_profile = OutputEncoderType::As5600;
+  if (CanService::takePendingOutputProfileChange(requested_profile)) {
+    // Profile/config changes are intentionally ignored while armed.
+  }
+
+  float requested_output_min_deg = 0.0f;
+  float requested_output_max_deg = 0.0f;
+  if (CanService::takePendingActuatorLimitsConfig(
+          requested_output_min_deg, requested_output_max_deg)) {
+    // Travel/config changes are intentionally ignored while armed.
+  }
+
+  float requested_gear_ratio = 1.0f;
+  if (CanService::takePendingActuatorGearConfig(requested_gear_ratio)) {
+    // Travel/config changes are intentionally ignored while armed.
   }
 
   if (ActuatorAPI::active_control_mode == ControlMode::OutputVelocity) {

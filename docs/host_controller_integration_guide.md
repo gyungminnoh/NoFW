@@ -129,6 +129,8 @@
 - actuator config status: `0x437`
 - profile cmd: `0x227`
 - power-stage cmd: `0x237`
+- actuator limits config cmd: `0x247`
+- actuator gear config cmd: `0x257`
 - runtime diag: `0x5F7`
 
 버스 조건:
@@ -261,6 +263,13 @@ power-stage command:
 - 상위 제어기는 "명령 보냈으니 움직이겠지"라고 가정하지 말고
 - `0x5F7` armed bit를 보고 arm 완료를 판단해야 한다
 
+설정 변경 제약:
+
+- `output_min_deg/output_max_deg` 변경은 disarmed 상태에서만 허용된다
+- gear ratio 변경도 disarmed 상태에서만 허용된다
+- armed 상태에서 설정 변경 프레임을 보내도 펌웨어는 적용하지 않는다
+- 상위 제어기는 설정 변경 전 반드시 `0x237#00`을 보내고 `0x5F7` armed bit가 `0`인지 확인해야 한다
+
 ## 8. 상위 제어기의 명령 채널 사용법
 
 ### 8.1 Angle command
@@ -352,9 +361,53 @@ power-stage command:
 
 gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요한 기본 설정값이다.
 
-## 10. 상위 제어기에서 권장하는 최소 통합 절차
+## 10. 설정 변경 절차
 
-### 10.1 연결 시
+### 10.1 Travel Limit 변경
+
+명령:
+
+- ID: `0x240 + node_id`
+- 기본 node `7`: `0x247`
+- payload:
+  - `data[0..3] = output_min_deg` as `int32 mdeg`
+  - `data[4..7] = output_max_deg` as `int32 mdeg`
+
+권장 절차:
+
+1. `0x237#00`으로 disarm
+2. `0x5F7`에서 armed bit가 `0`인지 확인
+3. `0x247`로 새 min/max 전송
+4. `0x427`에서 값이 바뀌었는지 확인
+5. 필요한 경우에만 다시 arm
+
+### 10.2 Gear Ratio 변경
+
+명령:
+
+- ID: `0x250 + node_id`
+- 기본 node `7`: `0x257`
+- payload:
+  - `data[0..3] = gear_ratio * 1000` as `int32`
+
+권장 절차:
+
+1. `0x237#00`으로 disarm
+2. `0x5F7`에서 armed bit가 `0`인지 확인
+3. `0x257`로 새 gear ratio 전송
+4. `0x437`에서 gear ratio가 바뀌었는지 확인
+5. `0x407`의 현재 출력각이 새 좌표계에서 기대 범위인지 확인
+6. 필요한 경우에만 다시 arm
+
+주의:
+
+- gear ratio 변경은 출력축 좌표계 자체를 바꾼다
+- `TmagLut` profile은 저장된 TMAG calibration의 learned gear ratio와 현재 gear ratio가 다르면 calibration required 상태로 간주된다
+- `DirectInput` profile은 `gear_ratio == 1.000`일 때만 유효하다
+
+## 11. 상위 제어기에서 권장하는 최소 통합 절차
+
+### 11.1 연결 시
 
 1. `0x5F7` 수신 대기
 2. `0x427`로 travel limit 확인
@@ -363,7 +416,7 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 5. 필요하면 profile 변경
 6. 다시 `0x5F7`로 적용 확인
 
-### 10.2 구동 시작 시
+### 11.2 구동 시작 시
 
 1. `arm`
 2. armed bit 확인
@@ -371,19 +424,19 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 4. `0x407/0x417`로 반응 확인
 5. 정상일 때만 본 운전 command stream 시작
 
-### 10.3 구동 중
+### 11.3 구동 중
 
 1. command를 timeout보다 빠르게 주기적으로 보냄
 2. `0x407/0x417` 감시
 3. `0x5F7` armed bit와 calibration 상태 감시
 
-### 10.4 정지 시
+### 11.4 정지 시
 
 1. velocity mode라면 먼저 `0 deg/s`
 2. 필요하면 `disarm`
 3. `0x5F7`에서 armed bit가 0으로 돌아왔는지 확인
 
-## 11. 상위 제어기가 피해야 할 가정
+## 12. 상위 제어기가 피해야 할 가정
 
 - profile이 runtime output feedback source라고 가정하면 안 된다
 - `0x5F7 data[3]`을 current active control mode라고 해석하면 안 된다
@@ -391,7 +444,7 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 - 큰 angle command가 항상 그 값까지 도달한다고 가정하면 안 된다
 - profile command에 별도 ack가 온다고 가정하면 안 된다
 
-## 12. 통합 시 흔한 실패 원인
+## 13. 통합 시 흔한 실패 원인
 
 ### profile 변경 후 동작이 기대와 다름
 
@@ -423,7 +476,7 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 - stored travel limit clamp
 - 현재 출력각이 이미 stored travel limit 밖에 있어서, 더 바깥쪽 명령이 현재 위치 hold로 제한됨
 
-## 13. 상위 제어기 구현 권장사항
+## 14. 상위 제어기 구현 권장사항
 
 - 명령 송신 스레드와 상태 수신 스레드를 분리한다
 - `0x5F7` 기반의 명시적 상태기계를 둔다

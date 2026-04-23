@@ -325,7 +325,52 @@ candump can0,417:7FF
 - 큰 angle command를 보내면 저장된 travel limit에서 멈추는가
 - disarm 했을 때 전력단이 확실히 내려가는가
 
-## 10. 이상 징후와 즉시 대응
+## 10. Actuator Config 변경 확인 (disarmed only)
+
+설정 변경은 반드시 disarm 상태에서만 수행한다.
+
+### 10.1 현재 limit / gear ratio 상태 보기
+
+```bash
+candump can0,427:7FF,437:7FF
+```
+
+기대:
+
+- `0x427`에서 `output_min_deg/output_max_deg`가 보인다
+- `0x437`에서 gear ratio가 보인다
+
+### 10.2 travel limit 변경
+
+예시 (`0 .. 2160 deg`):
+
+```bash
+cansend can0 237#00
+cansend can0 247#0000000080F52000
+candump can0,427:7FF
+```
+
+기대:
+
+- disarm 이후에도 링크는 유지된다
+- `0x427` payload가 설정값과 일치한다
+
+### 10.3 gear ratio 변경
+
+예시 (`8.000`):
+
+```bash
+cansend can0 237#00
+cansend can0 257#401F0000
+candump can0,437:7FF
+```
+
+기대:
+
+- `0x437`의 gear ratio가 `8.000`으로 보인다
+- 적용 직후 출력각 기준이 재초기화될 수 있다
+
+## 11. 이상 징후와 즉시 대응
 
 ### arm 하자마자 이상하게 움직임
 
@@ -368,7 +413,7 @@ cansend can0 237#00
 
 - 저장된 travel limit를 먼저 의심해야 한다
 
-## 11. 테스트 종료
+## 12. 테스트 종료
 
 테스트가 끝나면 항상:
 

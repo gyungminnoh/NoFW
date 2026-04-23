@@ -16,23 +16,34 @@ static bool g_has_pending_profile_change = false;
 static OutputEncoderType g_pending_profile_change = OutputEncoderType::As5600;
 static bool g_has_pending_power_stage_enable = false;
 static bool g_pending_power_stage_enable = false;
+static bool g_has_pending_actuator_limits_config = false;
+static float g_pending_output_min_deg = 0.0f;
+static float g_pending_output_max_deg = 0.0f;
+static bool g_has_pending_actuator_gear_config = false;
+static float g_pending_gear_ratio = 1.0f;
 static float g_last_pos_mt_rad = 0.0f;
 static uint32_t g_last_pos_sample_ms = 0;
 
 namespace CanService {
 
-bool init(const ActuatorConfig& actuator_config) {
-  bool ok = CanTransport::begin1Mbps();
+void configure(const ActuatorConfig& actuator_config) {
   g_last_rx_ms = millis();
-  g_last_tx_ms = g_last_rx_ms;
   g_has_rx = false;
   g_timeout_active = false;
   g_can_node_id = actuator_config.can_node_id;
   g_default_control_mode = actuator_config.default_control_mode;
   g_enable_output_angle_mode = actuator_config.enable_output_angle_mode;
   g_enable_velocity_mode = actuator_config.enable_velocity_mode;
+}
+
+bool init(const ActuatorConfig& actuator_config) {
+  bool ok = CanTransport::begin1Mbps();
+  configure(actuator_config);
+  g_last_tx_ms = g_last_rx_ms;
   g_has_pending_profile_change = false;
   g_has_pending_power_stage_enable = false;
+  g_has_pending_actuator_limits_config = false;
+  g_has_pending_actuator_gear_config = false;
   g_last_pos_mt_rad = 0.0f;
   g_last_pos_sample_ms = 0;
   return ok;
@@ -89,6 +100,29 @@ void poll(float current_motor_mt_rad) {
       }
       g_pending_power_stage_enable = enable;
       g_has_pending_power_stage_enable = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::actuatorLimitsConfigCmdCanId(g_can_node_id)) {
+      float output_min_deg = 0.0f;
+      float output_max_deg = 0.0f;
+      if (!CanProtocol::decodeActuatorLimitsConfigCmd_OptionA(
+              f.data, f.dlc, output_min_deg, output_max_deg)) {
+        continue;
+      }
+      g_pending_output_min_deg = output_min_deg;
+      g_pending_output_max_deg = output_max_deg;
+      g_has_pending_actuator_limits_config = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::actuatorGearConfigCmdCanId(g_can_node_id)) {
+      float gear_ratio = 1.0f;
+      if (!CanProtocol::decodeActuatorGearConfigCmd_OptionA(f.data, f.dlc, gear_ratio)) {
+        continue;
+      }
+      g_pending_gear_ratio = gear_ratio;
+      g_has_pending_actuator_gear_config = true;
     }
   }
 
@@ -162,6 +196,26 @@ bool takePendingPowerStageEnable(bool& out_enable) {
   }
   out_enable = g_pending_power_stage_enable;
   g_has_pending_power_stage_enable = false;
+  return true;
+}
+
+bool takePendingActuatorLimitsConfig(float& out_output_min_deg,
+                                     float& out_output_max_deg) {
+  if (!g_has_pending_actuator_limits_config) {
+    return false;
+  }
+  out_output_min_deg = g_pending_output_min_deg;
+  out_output_max_deg = g_pending_output_max_deg;
+  g_has_pending_actuator_limits_config = false;
+  return true;
+}
+
+bool takePendingActuatorGearConfig(float& out_gear_ratio) {
+  if (!g_has_pending_actuator_gear_config) {
+    return false;
+  }
+  out_gear_ratio = g_pending_gear_ratio;
+  g_has_pending_actuator_gear_config = false;
   return true;
 }
 

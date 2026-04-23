@@ -10,6 +10,8 @@ const stateEls = {
   gearRatioStatus: document.getElementById("gearRatioStatus"),
   angleLimitFeedback: document.getElementById("angleLimitFeedback"),
   currentRangeFeedback: document.getElementById("currentRangeFeedback"),
+  limitsConfigFeedback: document.getElementById("limitsConfigFeedback"),
+  gearConfigFeedback: document.getElementById("gearConfigFeedback"),
   profileFeedback: document.getElementById("profileFeedback"),
   storedProfile: document.getElementById("storedProfile"),
   activeProfile: document.getElementById("activeProfile"),
@@ -32,6 +34,9 @@ const controls = {
   zeroVelocityBtn: document.getElementById("zeroVelocityBtn"),
   stopStreamBtn: document.getElementById("stopStreamBtn"),
   sendRawBtn: document.getElementById("sendRawBtn"),
+  loadConfigBtn: document.getElementById("loadConfigBtn"),
+  saveLimitsBtn: document.getElementById("saveLimitsBtn"),
+  saveGearRatioBtn: document.getElementById("saveGearRatioBtn"),
   profileButtons: Array.from(document.querySelectorAll(".profile-btn")),
   anglePresetButtons: Array.from(document.querySelectorAll(".angle-preset")),
   velocityPresetButtons: Array.from(document.querySelectorAll(".velocity-preset")),
@@ -42,6 +47,9 @@ let profileFeedback = {
   text: "No profile request yet.",
   kind: "muted",
 };
+let configInputsTouched = false;
+let pendingLimitsRequest = null;
+let pendingGearRequest = null;
 
 function fmtNumber(value, suffix) {
   if (value === null || value === undefined) return "-";
@@ -51,6 +59,10 @@ function fmtNumber(value, suffix) {
 function fmtBool(value) {
   if (value === null || value === undefined) return "-";
   return value ? "true" : "false";
+}
+
+function closeEnough(a, b, tolerance = 0.001) {
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerance;
 }
 
 function getLimits(state) {
@@ -153,6 +165,27 @@ function readFiniteNumberInput(id, label) {
   return value;
 }
 
+function setConfigInputsFromState(state) {
+  const limits = state.limits || {};
+  const config = state.config || {};
+  if (Number.isFinite(limits.output_min_deg)) {
+    document.getElementById("outputMinInput").value = limits.output_min_deg.toFixed(3);
+  }
+  if (Number.isFinite(limits.output_max_deg)) {
+    document.getElementById("outputMaxInput").value = limits.output_max_deg.toFixed(3);
+  }
+  if (Number.isFinite(config.gear_ratio)) {
+    document.getElementById("gearRatioInput").value = config.gear_ratio.toFixed(3);
+  }
+  configInputsTouched = false;
+}
+
+function maybePopulateConfigInputs(state) {
+  if (!configInputsTouched) {
+    setConfigInputsFromState(state);
+  }
+}
+
 function updateProfileFeedback(diag, linkAlive) {
   if (!pendingProfileRequest) {
     stateEls.profileFeedback.textContent = profileFeedback.text;
@@ -191,6 +224,76 @@ function updateProfileFeedback(diag, linkAlive) {
 
   stateEls.profileFeedback.textContent = profileFeedback.text;
   stateEls.profileFeedback.className = `feedback ${profileFeedback.kind}`;
+}
+
+function updateActuatorConfigFeedback(state, linkAlive, armed) {
+  const limits = state.limits || {};
+  const config = state.config || {};
+  const now = performance.now();
+
+  if (pendingLimitsRequest) {
+    const target = pendingLimitsRequest;
+    const matched =
+      closeEnough(limits.output_min_deg, target.output_min_deg) &&
+      closeEnough(limits.output_max_deg, target.output_max_deg);
+    if (matched) {
+      stateEls.limitsConfigFeedback.textContent =
+        `Limits saved: ${target.output_min_deg.toFixed(3)} .. ${target.output_max_deg.toFixed(3)} deg`;
+      stateEls.limitsConfigFeedback.className = "feedback good";
+      pendingLimitsRequest = null;
+    } else if (!linkAlive) {
+      stateEls.limitsConfigFeedback.textContent = "Waiting for live 0x427 status.";
+      stateEls.limitsConfigFeedback.className = "feedback pending";
+    } else if (now - target.requestedAt > 2500) {
+      stateEls.limitsConfigFeedback.textContent =
+        "Limits not confirmed on 0x427; check firmware state and CAN traffic.";
+      stateEls.limitsConfigFeedback.className = "feedback bad";
+      pendingLimitsRequest = null;
+    } else {
+      stateEls.limitsConfigFeedback.textContent = "Waiting for 0x427 to confirm saved limits.";
+      stateEls.limitsConfigFeedback.className = "feedback pending";
+    }
+  } else {
+    stateEls.limitsConfigFeedback.textContent = armed
+      ? "Disarm before saving actuator limits."
+      : linkAlive
+        ? "Saving writes output_min_deg/output_max_deg to FRAM."
+        : "No live CAN frames.";
+    stateEls.limitsConfigFeedback.className = `feedback ${
+      armed ? "bad" : linkAlive ? "muted" : "pending"
+    }`;
+  }
+
+  if (pendingGearRequest) {
+    const target = pendingGearRequest;
+    const matched = closeEnough(config.gear_ratio, target.gear_ratio);
+    if (matched) {
+      stateEls.gearConfigFeedback.textContent =
+        `Gear ratio saved: ${target.gear_ratio.toFixed(3)}:1`;
+      stateEls.gearConfigFeedback.className = "feedback good";
+      pendingGearRequest = null;
+    } else if (!linkAlive) {
+      stateEls.gearConfigFeedback.textContent = "Waiting for live 0x437 status.";
+      stateEls.gearConfigFeedback.className = "feedback pending";
+    } else if (now - target.requestedAt > 2500) {
+      stateEls.gearConfigFeedback.textContent =
+        "Gear ratio not confirmed on 0x437; check firmware state and CAN traffic.";
+      stateEls.gearConfigFeedback.className = "feedback bad";
+      pendingGearRequest = null;
+    } else {
+      stateEls.gearConfigFeedback.textContent = "Waiting for 0x437 to confirm saved gear ratio.";
+      stateEls.gearConfigFeedback.className = "feedback pending";
+    }
+  } else {
+    stateEls.gearConfigFeedback.textContent = armed
+      ? "Disarm before saving gear ratio."
+      : linkAlive
+        ? "Saving writes gear ratio to FRAM and reinitializes the output coordinate."
+        : "No live CAN frames.";
+    stateEls.gearConfigFeedback.className = `feedback ${
+      armed ? "bad" : linkAlive ? "muted" : "pending"
+    }`;
+  }
 }
 
 async function postJson(path, payload) {
@@ -241,6 +344,7 @@ function renderState(state) {
   const config = state.config || {};
   const targetState = angleTargetState(state);
   const currentState = currentRangeState(state);
+  maybePopulateConfigInputs(state);
 
   stateEls.sessionInfo.textContent =
     `iface=${state.session.can_iface}, node_id=${state.session.node_id}`;
@@ -262,6 +366,7 @@ function renderState(state) {
   stateEls.angleLimitFeedback.className = `feedback ${targetState.kind}`;
   stateEls.currentRangeFeedback.textContent = currentState.message;
   stateEls.currentRangeFeedback.className = `feedback ${currentState.kind}`;
+  updateActuatorConfigFeedback(state, linkAlive, armed);
   updateProfileFeedback(diag, linkAlive);
   stateEls.storedProfile.textContent = diag.stored_profile || "-";
   stateEls.activeProfile.textContent = diag.active_profile || "-";
@@ -325,12 +430,37 @@ function renderState(state) {
     linkAlive,
     "No live CAN frames"
   );
+  setButtonEnabled(
+    controls.loadConfigBtn,
+    linkAlive,
+    "No live CAN frames"
+  );
+  setButtonEnabled(
+    controls.saveLimitsBtn,
+    linkAlive && !armed && !pendingLimitsRequest,
+    !linkAlive
+      ? "No live CAN frames"
+      : armed
+        ? "Actuator config can be changed only while disarmed"
+        : "Waiting for 0x427 confirmation"
+  );
+  setButtonEnabled(
+    controls.saveGearRatioBtn,
+    linkAlive && !armed && !pendingGearRequest,
+    !linkAlive
+      ? "No live CAN frames"
+      : armed
+        ? "Gear ratio can be changed only while disarmed"
+        : "Waiting for 0x437 confirmation"
+  );
 
   setActive(controls.armBtn, armed);
   setActive(controls.disarmBtn, !armed);
   setActive(controls.sendAngleBtn, streamEnabled && streamMode === "angle");
   setActive(controls.sendVelocityBtn, streamEnabled && streamMode === "velocity");
   setActive(controls.stopStreamBtn, !streamEnabled);
+  setPending(controls.saveLimitsBtn, !!pendingLimitsRequest);
+  setPending(controls.saveGearRatioBtn, !!pendingGearRequest);
 
   for (const btn of controls.profileButtons) {
     const isCurrent = btn.dataset.profile === activeProfile;
@@ -481,6 +611,60 @@ document.getElementById("sendRawBtn").addEventListener("click", async () =>
   })
 );
 
+document.getElementById("loadConfigBtn").addEventListener("click", () => {
+  if (lastState) {
+    setConfigInputsFromState(lastState);
+    renderState(lastState);
+  }
+});
+
+document.getElementById("saveLimitsBtn").addEventListener("click", async () =>
+  runAction(async () => {
+    const outputMinDeg = readFiniteNumberInput("outputMinInput", "Output min");
+    const outputMaxDeg = readFiniteNumberInput("outputMaxInput", "Output max");
+    pendingLimitsRequest = {
+      output_min_deg: outputMinDeg,
+      output_max_deg: outputMaxDeg,
+      requestedAt: performance.now(),
+    };
+    if (lastState) {
+      renderState(lastState);
+    }
+    try {
+      await postJson("/api/actuator_limits", {
+        output_min_deg: outputMinDeg,
+        output_max_deg: outputMaxDeg,
+      });
+      configInputsTouched = false;
+    } catch (err) {
+      pendingLimitsRequest = null;
+      throw err;
+    }
+  })
+);
+
+document.getElementById("saveGearRatioBtn").addEventListener("click", async () =>
+  runAction(async () => {
+    const gearRatio = readFiniteNumberInput("gearRatioInput", "Gear ratio");
+    pendingGearRequest = {
+      gear_ratio: gearRatio,
+      requestedAt: performance.now(),
+    };
+    if (lastState) {
+      renderState(lastState);
+    }
+    try {
+      await postJson("/api/gear_ratio", {
+        gear_ratio: gearRatio,
+      });
+      configInputsTouched = false;
+    } catch (err) {
+      pendingGearRequest = null;
+      throw err;
+    }
+  })
+);
+
 for (const btn of document.querySelectorAll(".angle-preset")) {
   btn.addEventListener("click", () => {
     document.getElementById("angleInput").value = btn.dataset.value;
@@ -514,6 +698,12 @@ document.getElementById("velocityInput").addEventListener("input", () => {
     controls.velocityPresetButtons
   );
 });
+
+for (const id of ["outputMinInput", "outputMaxInput", "gearRatioInput"]) {
+  document.getElementById(id).addEventListener("input", () => {
+    configInputsTouched = true;
+  });
+}
 
 refreshState();
 setInterval(refreshState, 250);
