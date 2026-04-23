@@ -1746,10 +1746,12 @@ Latest implementation step completed:
   - `python3 -m py_compile tools/can_ui/server.py tools/can_ui/smoke_test.py` passes
   - `node --check tools/can_ui/static/app.js` passes
   - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `30/30` before the CAN reinit fix
-  - upload of the CAN reinit fix is currently blocked by ST-Link/OpenOCD:
-    - `target voltage may be too low for reliable debugging`
-    - `unable to connect to the target`
-  - this likely requires checking board target power or ST-Link connection before hardware verification can continue
+  - after the user restored board power, `pio run -e custom_f446re -t upload` passed
+  - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `30/30` after upload
+  - explicit post-upload config-save verification passed:
+    - `/api/actuator_limits` with current values kept `link_alive = true`
+    - `/api/gear_ratio` with current value kept `link_alive = true`
+    - final state stayed profile `As5600`, `armed = false`, stream off
 - updated docs:
   - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
   - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
@@ -1759,9 +1761,9 @@ Latest implementation step completed:
 
 The highest-priority remaining tasks are now:
 
-1. Restore board target power / ST-Link target-voltage detection, then upload the current firmware with the CAN reinit fix.
-2. After upload, rerun `python3 tools/can_ui/smoke_test.py --use-running-server` and verify live CAN remains alive after `/api/actuator_limits` and `/api/gear_ratio`.
-3. Decide whether to auto-fallback profile when gear-ratio changes invalidate the currently stored profile, or to keep current reject-only behavior.
+1. Decide whether to auto-fallback profile when gear-ratio changes invalidate the currently stored profile, or to keep current reject-only behavior.
+2. Use the new config edit panel to set travel range around the actual mechanism working range before further wide-angle tuning.
+3. Continue manual motion testing from the web UI using the now-visible and editable config values.
 
 ## Important Constraints For Future Work
 
