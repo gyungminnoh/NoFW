@@ -5,6 +5,11 @@ const stateEls = {
   streamInfo: document.getElementById("streamInfo"),
   angleStatus: document.getElementById("angleStatus"),
   velocityStatus: document.getElementById("velocityStatus"),
+  outputMinStatus: document.getElementById("outputMinStatus"),
+  outputMaxStatus: document.getElementById("outputMaxStatus"),
+  gearRatioStatus: document.getElementById("gearRatioStatus"),
+  angleLimitFeedback: document.getElementById("angleLimitFeedback"),
+  currentRangeFeedback: document.getElementById("currentRangeFeedback"),
   profileFeedback: document.getElementById("profileFeedback"),
   storedProfile: document.getElementById("storedProfile"),
   activeProfile: document.getElementById("activeProfile"),
@@ -14,6 +19,7 @@ const stateEls = {
   needCalibration: document.getElementById("needCalibration"),
   armedState: document.getElementById("armedState"),
   diagRaw: document.getElementById("diagRaw"),
+  actuatorConfigRaw: document.getElementById("actuatorConfigRaw"),
   eventLog: document.getElementById("eventLog"),
 };
 const controls = {
@@ -45,6 +51,75 @@ function fmtNumber(value, suffix) {
 function fmtBool(value) {
   if (value === null || value === undefined) return "-";
   return value ? "true" : "false";
+}
+
+function getLimits(state) {
+  const limits = state.limits || {};
+  const min = limits.output_min_deg;
+  const max = limits.output_max_deg;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return { min, max };
+}
+
+function angleTargetState(state) {
+  const target = Number(document.getElementById("angleInput").value);
+  if (!Number.isFinite(target)) {
+    return {
+      target,
+      valid: false,
+      knownLimits: !!getLimits(state),
+      message: "Angle target must be finite.",
+      kind: "bad",
+    };
+  }
+
+  const limits = getLimits(state);
+  if (!limits) {
+    return {
+      target,
+      valid: true,
+      knownLimits: false,
+      message: "Travel limits are not available yet; firmware may clamp the target.",
+      kind: "pending",
+    };
+  }
+
+  const valid = target >= limits.min && target <= limits.max;
+  return {
+    target,
+    valid,
+    knownLimits: true,
+    message: valid
+      ? `Target is inside ${limits.min.toFixed(3)} .. ${limits.max.toFixed(3)} deg.`
+      : `Target is outside ${limits.min.toFixed(3)} .. ${limits.max.toFixed(3)} deg and would be clamped by firmware.`,
+    kind: valid ? "good" : "bad",
+  };
+}
+
+function currentRangeState(state) {
+  const angle = state.angle_deg;
+  if (!Number.isFinite(angle)) {
+    return {
+      message: "Current angle is not available yet.",
+      kind: "pending",
+    };
+  }
+
+  const limits = getLimits(state);
+  if (!limits) {
+    return {
+      message: "Travel limits are not available yet.",
+      kind: "pending",
+    };
+  }
+
+  const inside = angle >= limits.min && angle <= limits.max;
+  return {
+    message: inside
+      ? `Current angle is inside ${limits.min.toFixed(3)} .. ${limits.max.toFixed(3)} deg.`
+      : `Current angle is outside ${limits.min.toFixed(3)} .. ${limits.max.toFixed(3)} deg; inward recovery targets are allowed, but outward targets will be clamped.`,
+    kind: inside ? "good" : "bad",
+  };
 }
 
 function setButtonEnabled(button, enabled, reason = "") {
@@ -162,6 +237,10 @@ function renderState(state) {
   const activeProfile = diag.active_profile || null;
   const streamEnabled = !!state.stream.enabled;
   const streamMode = state.stream.mode || null;
+  const limits = state.limits || {};
+  const config = state.config || {};
+  const targetState = angleTargetState(state);
+  const currentState = currentRangeState(state);
 
   stateEls.sessionInfo.textContent =
     `iface=${state.session.can_iface}, node_id=${state.session.node_id}`;
@@ -173,6 +252,16 @@ function renderState(state) {
     : "stream disabled";
   stateEls.angleStatus.textContent = fmtNumber(state.angle_deg, "deg");
   stateEls.velocityStatus.textContent = fmtNumber(state.velocity_deg_s, "deg/s");
+  stateEls.outputMinStatus.textContent = fmtNumber(limits.output_min_deg, "deg");
+  stateEls.outputMaxStatus.textContent = fmtNumber(limits.output_max_deg, "deg");
+  stateEls.gearRatioStatus.textContent =
+    config.gear_ratio === null || config.gear_ratio === undefined
+      ? "-"
+      : `${config.gear_ratio.toFixed(3)}:1`;
+  stateEls.angleLimitFeedback.textContent = targetState.message;
+  stateEls.angleLimitFeedback.className = `feedback ${targetState.kind}`;
+  stateEls.currentRangeFeedback.textContent = currentState.message;
+  stateEls.currentRangeFeedback.className = `feedback ${currentState.kind}`;
   updateProfileFeedback(diag, linkAlive);
   stateEls.storedProfile.textContent = diag.stored_profile || "-";
   stateEls.activeProfile.textContent = diag.active_profile || "-";
@@ -182,6 +271,9 @@ function renderState(state) {
   stateEls.needCalibration.textContent = fmtBool(diag.need_calibration);
   stateEls.armedState.textContent = fmtBool(diag.armed);
   stateEls.diagRaw.textContent = diag.raw_hex || "-";
+  stateEls.actuatorConfigRaw.textContent =
+    `limits 0x${(0x420 + state.session.node_id).toString(16).toUpperCase()}: ${limits.raw_hex || "-"}\n` +
+    `config 0x${(0x430 + state.session.node_id).toString(16).toUpperCase()}: ${config.raw_hex || "-"}`;
   renderLog(state.logs);
 
   setButtonEnabled(controls.applySessionBtn, true);
@@ -197,8 +289,12 @@ function renderState(state) {
   );
   setButtonEnabled(
     controls.sendAngleBtn,
-    linkAlive && angleEnabled,
-    !linkAlive ? "No live CAN frames" : "Angle mode is disabled by current profile"
+    linkAlive && angleEnabled && targetState.valid,
+    !linkAlive
+      ? "No live CAN frames"
+      : !angleEnabled
+        ? "Angle mode is disabled by current profile"
+        : targetState.message
   );
   setButtonEnabled(
     controls.holdCurrentBtn,
@@ -258,10 +354,17 @@ function renderState(state) {
   syncPresetState(angleInput, controls.anglePresetButtons);
   syncPresetState(velocityInput, controls.velocityPresetButtons);
   for (const btn of controls.anglePresetButtons) {
+    const preset = Number(btn.dataset.value);
+    const presetInRange =
+      !getLimits(state) || (Number.isFinite(preset) && preset >= getLimits(state).min && preset <= getLimits(state).max);
     setButtonEnabled(
       btn,
-      linkAlive && angleEnabled,
-      !linkAlive ? "No live CAN frames" : "Angle mode is disabled by current profile"
+      linkAlive && angleEnabled && presetInRange,
+      !linkAlive
+        ? "No live CAN frames"
+        : !angleEnabled
+          ? "Angle mode is disabled by current profile"
+          : "Preset is outside the configured travel limits"
     );
   }
   for (const btn of controls.velocityPresetButtons) {
@@ -394,6 +497,12 @@ for (const btn of document.querySelectorAll(".velocity-preset")) {
     );
   });
 }
+
+document.getElementById("angleInput").addEventListener("input", () => {
+  if (lastState) {
+    renderState(lastState);
+  }
+});
 
 document.getElementById("angleInput").addEventListener("input", () => {
   syncPresetState(document.getElementById("angleInput"), controls.anglePresetButtons);

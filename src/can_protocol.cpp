@@ -20,6 +20,14 @@ uint16_t outputVelocityStatusCanId(uint8_t node_id) {
   return CAN_ID_OUTPUT_VEL_STATUS_BASE + node_id;
 }
 
+uint16_t actuatorLimitsStatusCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_LIMITS_STATUS_BASE + node_id;
+}
+
+uint16_t actuatorConfigStatusCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_CONFIG_STATUS_BASE + node_id;
+}
+
 uint16_t outputProfileCmdCanId(uint8_t node_id) {
   return CAN_ID_OUTPUT_PROFILE_CMD_BASE + node_id;
 }
@@ -70,6 +78,55 @@ bool encodeOutputVelocityDegPerSec_OptionA(float velocity_deg_s,
                                            uint8_t data[8],
                                            uint8_t& out_len) {
   return encodeInt32MUnits_(velocity_deg_s, data, out_len);
+}
+
+bool encodeActuatorLimitsStatus_OptionA(float output_min_deg,
+                                        float output_max_deg,
+                                        uint8_t data[8],
+                                        uint8_t& out_len) {
+  uint8_t min_len = 0;
+  if (!encodeInt32MUnits_(output_min_deg, data, min_len) || min_len != 4) {
+    return false;
+  }
+
+  uint8_t max_data[8] = {0};
+  uint8_t max_len = 0;
+  if (!encodeInt32MUnits_(output_max_deg, max_data, max_len) || max_len != 4) {
+    return false;
+  }
+
+  data[4] = max_data[0];
+  data[5] = max_data[1];
+  data[6] = max_data[2];
+  data[7] = max_data[3];
+  out_len = 8;
+  return true;
+}
+
+bool encodeActuatorConfigStatus_OptionA(float gear_ratio,
+                                        OutputEncoderType stored_profile,
+                                        ControlMode default_control_mode,
+                                        bool enable_velocity_mode,
+                                        bool enable_output_angle_mode,
+                                        uint8_t data[8],
+                                        uint8_t& out_len) {
+  uint8_t gear_len = 0;
+  if (!encodeInt32MUnits_(gear_ratio, data, gear_len) || gear_len != 4) {
+    return false;
+  }
+
+  data[4] = static_cast<uint8_t>(stored_profile);
+  data[5] = static_cast<uint8_t>(default_control_mode);
+  data[6] = 0;
+  if (enable_velocity_mode) {
+    data[6] |= 0x01;
+  }
+  if (enable_output_angle_mode) {
+    data[6] |= 0x02;
+  }
+  data[7] = 0;
+  out_len = 8;
+  return true;
 }
 
 bool decodeOutputProfileCmd_OptionA(const uint8_t data[8],

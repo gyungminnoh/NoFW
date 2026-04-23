@@ -26,6 +26,8 @@
 - `0x210 + node_id` velocity command
 - `0x400 + node_id` angle status
 - `0x410 + node_id` velocity status
+- `0x420 + node_id` actuator travel limits status
+- `0x430 + node_id` actuator config status
 - `0x5F0 + node_id` runtime diag
 
 제외:
@@ -60,7 +62,10 @@
 
 - 현재 출력축 angle
 - 현재 출력축 velocity
+- output_min_deg / output_max_deg
+- gear ratio
 - runtime diag raw frame
+- actuator config raw frames
 - stored profile
 - active profile
 - default control mode
@@ -93,6 +98,7 @@
   - 이미 armed면 `Arm` 버튼은 disabled
   - 이미 disarmed면 `Disarm` 버튼은 disabled
   - 현재 profile이 angle mode를 허용하지 않으면 angle 관련 버튼은 disabled
+  - travel limit을 알고 있고 target이 범위 밖이면 angle command 버튼은 disabled
   - 현재 profile이 velocity mode를 허용하지 않으면 velocity 관련 버튼은 disabled
   - link가 죽어 있으면 대부분의 제어 버튼은 disabled
 
@@ -117,6 +123,8 @@
 - background monitor thread:
   - `0x407`
   - `0x417`
+  - `0x427`
+  - `0x437`
   - `0x5F7`
   를 감시
 - background tx thread:

@@ -31,6 +31,11 @@ h2 {
   margin-top: 0;
 }
 
+.subhead {
+  margin: 16px 0 8px;
+  font-size: 1rem;
+}
+
 label {
   display: block;
   margin-bottom: 12px;

@@ -125,6 +125,8 @@
 - angle status: `0x407`
 - velocity cmd: `0x217`
 - velocity status: `0x417`
+- actuator limits status: `0x427`
+- actuator config status: `0x437`
 - profile cmd: `0x227`
 - power-stage cmd: `0x237`
 - runtime diag: `0x5F7`
@@ -161,6 +163,10 @@
   - 상위 제어기가 마지막으로 성공적으로 보낸 command 종류를 기준으로 관리
 - `streaming_ok`:
   - timeout을 피할 만큼 주기적으로 command를 보내고 있는가
+- `travel_limits_known`:
+  - `0x427`에서 `output_min_deg/output_max_deg`를 읽었는가
+- `gear_ratio_known`:
+  - `0x437`에서 gear ratio를 읽었는가
 
 중요:
 
@@ -174,11 +180,13 @@
 
 1. `CAN` 링크가 살아 있는지 확인
 2. `0x5F7`를 읽어 stored/active profile, `need_calibration`, armed bit 확인
-3. 원하는 profile이 아니면 `0x227`로 변경 요청
-4. 다시 `0x5F7`를 읽어 active profile이 바뀌었는지 확인
-5. 필요한 경우에만 `0x237#01`로 arm
-6. 작은 command로 방향과 반응 확인
-7. 정상 확인 후 본 운전으로 들어감
+3. `0x427`를 읽어 `output_min_deg/output_max_deg` 확인
+4. `0x437`를 읽어 gear ratio 확인
+5. 원하는 profile이 아니면 `0x227`로 변경 요청
+6. 다시 `0x5F7`를 읽어 active profile이 바뀌었는지 확인
+7. 필요한 경우에만 `0x237#01`로 arm
+8. 작은 command로 방향과 반응 확인
+9. 정상 확인 후 본 운전으로 들어감
 
 권장 판정:
 
@@ -269,6 +277,7 @@ power-stage command:
 
 - 처음에는 작은 각도 명령으로 방향 확인
 - 큰 양/음의 값은 실제로는 travel limit에 의해 clamp될 수 있음
+- 상위 제어기는 `0x427`의 `output_min_deg/output_max_deg`를 확인하고, 범위 밖 target을 보내지 않는 편이 좋음
 
 ### 8.2 Velocity command
 
@@ -320,14 +329,39 @@ power-stage command:
 - `0x5F7`:
   - 운전 가능 여부, profile 상태, arm 상태 확인용
 
+### 9.4 `0x427`
+
+- actuator travel limit status
+- DLC: `8`
+- `data[0..3] = output_min_deg`
+- `data[4..7] = output_max_deg`
+- 각 값은 `int32 mdeg`
+
+상위 제어기는 angle command를 만들기 전에 이 범위를 확인해야 한다.
+현재 펌웨어는 범위 밖 target을 내부에서 clamp할 수 있으므로, 상위 계층에서 먼저 막는 편이 더 직관적이다.
+
+### 9.5 `0x437`
+
+- actuator config status
+- DLC: `8`
+- `data[0..3] = gear_ratio * 1000`
+- `data[4] = stored output_encoder_type`
+- `data[5] = default_control_mode`
+- `data[6] bit0 = enable_velocity_mode`
+- `data[6] bit1 = enable_output_angle_mode`
+
+gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요한 기본 설정값이다.
+
 ## 10. 상위 제어기에서 권장하는 최소 통합 절차
 
 ### 10.1 연결 시
 
 1. `0x5F7` 수신 대기
-2. 원하는 profile과 calibration 상태 확인
-3. 필요하면 profile 변경
-4. 다시 `0x5F7`로 적용 확인
+2. `0x427`로 travel limit 확인
+3. `0x437`로 gear ratio 확인
+4. 원하는 profile과 calibration 상태 확인
+5. 필요하면 profile 변경
+6. 다시 `0x5F7`로 적용 확인
 
 ### 10.2 구동 시작 시
 

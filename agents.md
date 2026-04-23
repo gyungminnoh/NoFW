@@ -1653,6 +1653,49 @@ The highest-priority remaining tasks are now:
 2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
 3. If faster large-angle moves are needed later, tune angle-mode velocity profiling separately instead of increasing `pvc.Kp` first.
 
+Latest implementation step completed:
+
+- added CAN-visible actuator travel/config status frames:
+  - `0x420 + node_id`: `output_min_deg`, `output_max_deg` as `int32 mdeg`
+  - `0x430 + node_id`: gear ratio as `int32 milli-ratio`, plus stored profile/default mode/enable flags
+- updated the main firmware to transmit those frames alongside runtime diag every `500 ms`
+- updated the CAN web UI to monitor and display:
+  - `output_min_deg`
+  - `output_max_deg`
+  - gear ratio
+  - raw actuator config frames
+- updated UI button policy:
+  - angle command is disabled when live travel limits are known and the target is outside range
+  - out-of-range angle presets are disabled
+- added a UI warning when the current output angle itself is outside the configured travel range
+- bumped web UI static asset versions to `v5`
+- restarted the local UI server on:
+  - `http://127.0.0.1:8765`
+- uploaded the firmware to the board:
+  - `pio run -e custom_f446re -t upload`
+- verified live UI/API state:
+  - `output_min_deg = 0.000`
+  - `output_max_deg = 2160.000`
+  - `gear_ratio = 8.000`
+  - active profile `As5600`
+  - `armed = false`
+  - stream off
+- updated protocol/integration docs:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+- verification passed:
+  - `pio run -e custom_f446re`
+  - `python3 -m py_compile tools/can_ui/server.py tools/can_ui/smoke_test.py`
+  - `node --check tools/can_ui/static/app.js`
+  - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `24/24`
+
+The highest-priority remaining tasks are now:
+
+1. Add CAN commands and UI controls to edit persistent `output_min_deg`, `output_max_deg`, and gear ratio when the user is ready to configure them from the UI instead of compile-time/default values.
+2. For future manual motion tests, use the visible travel limits to avoid silent clamp cases before judging PID behavior.
+3. Decide whether `output_min_deg/output_max_deg` should be reset around the current boot zero before continuing wide-range angle tests on this physical setup.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

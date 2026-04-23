@@ -1,5 +1,6 @@
 #include "app.h"
 #include "actuator_api.h"
+#include "can_protocol.h"
 #include "can_transport.h"
 #include "config/actuator_defaults.h"
 #include "config/calibration_constants.h"
@@ -188,6 +189,35 @@ void sendRuntimeDiagIfDue() {
     data[7] |= 0x02;
   }
   CanTransport::sendStd(runtimeDiagCanId(), data, 8);
+
+  uint8_t limits_data[8] = {0};
+  uint8_t limits_len = 0;
+  if (CanProtocol::encodeActuatorLimitsStatus_OptionA(
+          actuator_config.output_min_deg,
+          actuator_config.output_max_deg,
+          limits_data,
+          limits_len)) {
+    CanTransport::sendStd(
+        CanProtocol::actuatorLimitsStatusCanId(actuator_config.can_node_id),
+        limits_data,
+        limits_len);
+  }
+
+  uint8_t config_data[8] = {0};
+  uint8_t config_len = 0;
+  if (CanProtocol::encodeActuatorConfigStatus_OptionA(
+          actuator_config.gear_ratio,
+          actuator_config.output_encoder_type,
+          actuator_config.default_control_mode,
+          actuator_config.enable_velocity_mode,
+          actuator_config.enable_output_angle_mode,
+          config_data,
+          config_len)) {
+    CanTransport::sendStd(
+        CanProtocol::actuatorConfigStatusCanId(actuator_config.can_node_id),
+        config_data,
+        config_len);
+  }
 }
 
 void refreshBootReference() {

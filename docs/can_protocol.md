@@ -29,6 +29,8 @@
 - 출력축 각도 상태 TX: `0x400 + node_id`
 - 출력축 속도 명령 RX: `0x210 + node_id`
 - 출력축 속도 상태 TX: `0x410 + node_id`
+- actuator travel limit 상태 TX: `0x420 + node_id`
+- actuator config 상태 TX: `0x430 + node_id`
 - 출력 프로파일 변경 RX: `0x220 + node_id`
 - power-stage arm/disarm RX: `0x230 + node_id`
 - 런타임 진단 TX: `0x5F0 + node_id`
@@ -39,6 +41,8 @@
 - angle status = `0x407`
 - velocity cmd = `0x217`
 - velocity status = `0x417`
+- actuator limits status = `0x427`
+- actuator config status = `0x437`
 - profile cmd = `0x227`
 - power-stage cmd = `0x237`
 - runtime diag = `0x5F7`
@@ -125,6 +129,55 @@ angle target 제한 정책:
 
 이 값도 런타임 output encoder 변화율이 아니라,
 motor multi-turn 추정값의 시간차로 계산한 출력축 속도다.
+
+## Actuator Limits Status
+
+- ID: `0x420 + node_id`
+- DLC: `8`
+- 의미: 현재 펌웨어가 사용하는 출력축 travel limit
+- 송신 주기: runtime diagnostic과 동일하게 기본 `500 ms`
+
+Payload:
+
+- `data[0..3] = output_min_deg`
+- `data[4..7] = output_max_deg`
+
+각 값은 `int32 mdeg` little-endian이다.
+
+기본 `node_id = 7`에서 현재 `0 .. 2160 deg`라면:
+
+```text
+0x427#0000000080F52000
+```
+
+상위 제어기와 UI는 angle command를 보내기 전에 이 범위를 확인해야 한다.
+범위 밖 angle target은 펌웨어 내부에서 clamp될 수 있다.
+
+## Actuator Config Status
+
+- ID: `0x430 + node_id`
+- DLC: `8`
+- 의미: 상위 제어기가 actuator 해석에 필요한 정적 설정 요약
+- 송신 주기: runtime diagnostic과 동일하게 기본 `500 ms`
+
+Payload:
+
+- `data[0..3] = gear_ratio`
+  - `int32` little-endian
+  - scale `0.001`
+  - 예: `8.000:1` -> `8000` -> `40 1F 00 00`
+- `data[4] = stored output_encoder_type`
+- `data[5] = default_control_mode`
+- `data[6]` bitfield:
+  - bit0 = `enable_velocity_mode`
+  - bit1 = `enable_output_angle_mode`
+- `data[7] = reserved`
+
+기본 `node_id = 7`, `gear_ratio = 8.000`, `As5600`, `OutputAngle`, angle/velocity enabled이면:
+
+```text
+0x437#401F000001010300
+```
 
 ## Output Profile Command
 

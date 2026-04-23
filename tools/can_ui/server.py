@@ -110,6 +110,8 @@ class CanUiBridge:
         self._logs: deque[dict[str, Any]] = deque(maxlen=300)
         self._latest_angle_deg: Optional[float] = None
         self._latest_velocity_deg_s: Optional[float] = None
+        self._latest_limits: dict[str, Any] = {}
+        self._latest_config: dict[str, Any] = {}
         self._latest_diag: dict[str, Any] = {}
         self._last_frame_time: Optional[float] = None
         self._last_error: Optional[str] = None
@@ -166,6 +168,8 @@ class CanUiBridge:
             self._config = SessionConfig(can_iface=can_iface, node_id=node_id)
             self._latest_angle_deg = None
             self._latest_velocity_deg_s = None
+            self._latest_limits = {}
+            self._latest_config = {}
             self._latest_diag = {}
             self._last_frame_time = None
             self._last_error = None
@@ -179,12 +183,16 @@ class CanUiBridge:
         cfg = self._config
         angle_id = frame_id(0x400, cfg.node_id)
         velocity_id = frame_id(0x410, cfg.node_id)
+        limits_id = frame_id(0x420, cfg.node_id)
+        config_id = frame_id(0x430, cfg.node_id)
         diag_id = frame_id(0x5F0, cfg.node_id)
         return [
             "candump",
             "-L",
             f"{cfg.can_iface},{angle_id:03X}:7FF",
             f"{cfg.can_iface},{velocity_id:03X}:7FF",
+            f"{cfg.can_iface},{limits_id:03X}:7FF",
+            f"{cfg.can_iface},{config_id:03X}:7FF",
             f"{cfg.can_iface},{diag_id:03X}:7FF",
         ]
 
@@ -239,6 +247,8 @@ class CanUiBridge:
         cfg = self._config
         angle_id = frame_id(0x400, cfg.node_id)
         velocity_id = frame_id(0x410, cfg.node_id)
+        limits_id = frame_id(0x420, cfg.node_id)
+        config_id = frame_id(0x430, cfg.node_id)
         diag_id = frame_id(0x5F0, cfg.node_id)
 
         with self._lock:
@@ -248,9 +258,43 @@ class CanUiBridge:
                 self._latest_angle_deg = decode_milli_units(payload_hex)
             elif can_id == velocity_id:
                 self._latest_velocity_deg_s = decode_milli_units(payload_hex)
+            elif can_id == limits_id:
+                self._latest_limits = self._decode_limits(payload_hex)
+                self._latest_limits["raw_hex"] = payload_hex
+            elif can_id == config_id:
+                self._latest_config = self._decode_config(payload_hex)
+                self._latest_config["raw_hex"] = payload_hex
             elif can_id == diag_id:
                 self._latest_diag = self._decode_diag(payload_hex)
                 self._latest_diag["raw_hex"] = payload_hex
+
+    def _decode_limits(self, payload_hex: str) -> dict[str, Any]:
+        if len(payload_hex) < 16:
+            return {"raw_hex": payload_hex}
+        min_deg = decode_milli_units(payload_hex[:8])
+        max_deg = decode_milli_units(payload_hex[8:16])
+        return {
+            "output_min_deg": min_deg,
+            "output_max_deg": max_deg,
+        }
+
+    def _decode_config(self, payload_hex: str) -> dict[str, Any]:
+        data = bytes.fromhex(payload_hex)
+        if len(data) < 8:
+            return {"raw_hex": payload_hex}
+        gear_ratio = decode_milli_units(payload_hex[:8])
+        flags = data[6]
+        return {
+            "gear_ratio": gear_ratio,
+            "stored_profile_code": data[4],
+            "stored_profile": PROFILE_NAMES.get(data[4], f"Unknown({data[4]})"),
+            "default_control_mode_code": data[5],
+            "default_control_mode": CONTROL_MODE_NAMES.get(
+                data[5], f"Unknown({data[5]})"
+            ),
+            "enable_velocity_mode": bool(flags & 0x01),
+            "enable_output_angle_mode": bool(flags & 0x02),
+        }
 
     def _decode_diag(self, payload_hex: str) -> dict[str, Any]:
         data = bytes.fromhex(payload_hex)
@@ -429,6 +473,8 @@ class CanUiBridge:
                 "last_error": self._last_error,
                 "angle_deg": self._latest_angle_deg,
                 "velocity_deg_s": self._latest_velocity_deg_s,
+                "limits": self._latest_limits,
+                "config": self._latest_config,
                 "diag": self._latest_diag,
                 "stream": {
                     "enabled": self._stream_enabled,

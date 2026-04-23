@@ -61,6 +61,8 @@ static constexpr uint16_t CAN_ID_OUTPUT_ANGLE_CMD_BASE = 0x200;
 static constexpr uint16_t CAN_ID_OUTPUT_ANGLE_STATUS_BASE = 0x400;
 static constexpr uint16_t CAN_ID_OUTPUT_VEL_CMD_BASE = 0x210;
 static constexpr uint16_t CAN_ID_OUTPUT_VEL_STATUS_BASE = 0x410;
+static constexpr uint16_t CAN_ID_ACTUATOR_LIMITS_STATUS_BASE = 0x420;
+static constexpr uint16_t CAN_ID_ACTUATOR_CONFIG_STATUS_BASE = 0x430;
 static constexpr uint16_t CAN_ID_OUTPUT_PROFILE_CMD_BASE = 0x220;
 static constexpr uint16_t CAN_ID_POWER_STAGE_CMD_BASE = 0x230;
 

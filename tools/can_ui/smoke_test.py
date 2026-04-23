@@ -54,6 +54,8 @@ class SmokeTest:
                     and isinstance(state, dict)
                     and state.get("link_alive")
                     and state.get("diag", {}).get("active_profile")
+                    and state.get("limits", {}).get("output_max_deg") is not None
+                    and state.get("config", {}).get("gear_ratio") is not None
                 ):
                     return state
             except Exception as exc:  # noqa: BLE001 - smoke test should report any readiness issue.
@@ -76,8 +78,11 @@ class SmokeTest:
 
         status, html = request_json(self.base_url, "/")
         self.check("index served", status == 200)
-        self.check("index references app v4", "/static/app.js?v=4" in html)
-        self.check("index references styles v4", "/static/styles.css?v=4" in html)
+        self.check("index references app v5", "/static/app.js?v=5" in html)
+        self.check("index references styles v5", "/static/styles.css?v=5" in html)
+        self.check("index exposes output min", "outputMinStatus" in html)
+        self.check("index exposes gear ratio", "gearRatioStatus" in html)
+        self.check("index exposes current range warning", "currentRangeFeedback" in html)
 
         invalid_cases = [
             (
@@ -148,6 +153,15 @@ class SmokeTest:
 
         state = self.wait_live_diag()
         self.check("link alive after session reset", state.get("link_alive") is True)
+        self.check(
+            "travel limits visible",
+            state.get("limits", {}).get("output_min_deg") is not None
+            and state.get("limits", {}).get("output_max_deg") is not None,
+        )
+        self.check(
+            "gear ratio visible",
+            state.get("config", {}).get("gear_ratio") is not None,
+        )
         self.check("still disarmed after tests", state.get("diag", {}).get("armed") is False)
         self.check("stream remains off after tests", state.get("stream", {}).get("enabled") is False)
 
