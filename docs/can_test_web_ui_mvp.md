@@ -68,6 +68,7 @@
 - actuator config raw frames
 - stored profile
 - active profile
+- last profile-select result
 - default control mode
 - `need_calibration`
 - `armed`
@@ -102,6 +103,7 @@
   - 현재 profile이 angle mode를 허용하지 않으면 angle 관련 버튼은 disabled
   - travel limit을 알고 있고 target이 범위 밖이면 angle command 버튼은 disabled
   - 현재 profile이 velocity mode를 허용하지 않으면 velocity 관련 버튼은 disabled
+  - profile 선택 버튼은 disarmed 상태에서만 enabled
   - actuator limit / gear ratio 저장 버튼은 disarmed 상태에서만 enabled
   - link가 죽어 있으면 대부분의 제어 버튼은 disabled
 
@@ -109,7 +111,8 @@
 
 - 현재 active profile 버튼은 눌린 상태처럼 보여야 한다
 - profile 변경을 누르면 다음 `0x5F7`에서 stored/active profile이 요청값과 일치할 때까지 pending 상태를 보여야 한다
-- profile 변경이 일정 시간 안에 반영되지 않으면 현재 active profile과 함께 실패 메시지를 보여야 한다
+- profile 변경이 반영되지 않으면 `0x5F7`의 profile-select result를 우선 표시해야 한다
+- `As5600ReadFailed`이면 AS5600을 전환 시점에 읽지 못했다는 메시지를 보여야 한다
 - 현재 latched stream이 angle인지 velocity인지 해당 버튼이 눌린 상태처럼 보여야 한다
 - preset 버튼도 현재 입력값과 일치하면 눌린 상태처럼 보여야 한다
 
@@ -140,6 +143,8 @@
 - UI는 사용자가 마지막으로 보낸 target을 계속 재전송하고 있음을 화면에 보여줘야 한다
 - 큰 command를 보내기 전에 작은 command로 방향 확인을 권장해야 한다
 - runtime diag에서 `armed` bit를 명시적으로 보여줘야 한다
+- runtime diag에서 profile-select result를 명시적으로 보여줘야 한다
+- profile 변경은 active stream을 정지하고 disarmed 상태에서만 수행해야 한다
 - actuator config 저장은 active stream을 정지하고 disarmed 상태에서만 수행해야 한다
 
 ## 구현 위치

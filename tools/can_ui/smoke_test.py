@@ -103,8 +103,8 @@ class SmokeTest:
 
         status, html = request_json(self.base_url, "/")
         self.check("index served", status == 200)
-        self.check("index references app v6", "/static/app.js?v=6" in html)
-        self.check("index references styles v6", "/static/styles.css?v=6" in html)
+        self.check("index references app v7", "/static/app.js?v=7" in html)
+        self.check("index references styles v7", "/static/styles.css?v=7" in html)
         self.check("index exposes output min", "outputMinStatus" in html)
         self.check("index exposes gear ratio", "gearRatioStatus" in html)
         self.check("index exposes current range warning", "currentRangeFeedback" in html)

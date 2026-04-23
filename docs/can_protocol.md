@@ -206,6 +206,12 @@ Payload:
 2. 가능하면 즉시 적용하고
 3. `FRAM`의 `ActuatorConfig`에 저장한다
 
+적용 조건:
+
+- power stage가 `disarmed` 상태일 때만 적용된다
+- `armed` 상태에서 보낸 profile command는 안전상 적용하지 않는다
+- `As5600` profile은 전환 시점에 AS5600 절대각을 읽을 수 있어야 적용된다
+
 결과 확인은 별도 ack 프레임 대신 runtime diagnostic frame `0x5F0 + node_id`를 사용한다.
 
 ## Power Stage Command
@@ -312,10 +318,21 @@ Payload:
 - `data[3] = default_control_mode`
 - `data[4] = enable_velocity_mode`
 - `data[5] = enable_output_angle_mode`
-- `data[6] = need_calibration`
+- `data[6]` bitfield:
+  - bit0 = `need_calibration`
+  - bits4..7 = last profile-select result
 - `data[7]` bitfield:
   - bit0 = output feedback required
   - bit1 = power stage armed
+
+Profile-select result:
+
+- `0` = `None`
+- `1` = `Ok`
+- `2` = `RejectedArmed`
+- `3` = `As5600ReadFailed`
+- `4` = `NotSelectable`
+- `5` = `SaveFailed`
 
 예시:
 
@@ -326,6 +343,7 @@ Payload:
   - velocity mode enabled = `1`
   - angle mode enabled = `1`
   - calibration blocking = `0`
+  - last profile-select result = `None`
   - output feedback required = `1`
   - power stage armed = `0`
 
@@ -335,6 +353,8 @@ Payload:
   - default control mode = `OutputVelocity`
   - velocity mode enabled = `1`
   - angle mode enabled = `0`
+  - calibration blocking = `0`
+  - last profile-select result = `None`
   - output feedback required = `0`
   - power stage armed = `0`
 

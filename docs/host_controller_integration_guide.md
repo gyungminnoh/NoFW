@@ -184,7 +184,7 @@
 2. `0x5F7`를 읽어 stored/active profile, `need_calibration`, armed bit 확인
 3. `0x427`를 읽어 `output_min_deg/output_max_deg` 확인
 4. `0x437`를 읽어 gear ratio 확인
-5. 원하는 profile이 아니면 `0x227`로 변경 요청
+5. 원하는 profile이 아니면 먼저 `0x237#00`으로 disarm하고 `0x227`로 변경 요청
 6. 다시 `0x5F7`를 읽어 active profile이 바뀌었는지 확인
 7. 필요한 경우에만 `0x237#01`로 arm
 8. 작은 command로 방향과 반응 확인
@@ -210,12 +210,17 @@ profile command:
 - 동시에 `FRAM`에 저장된다
 - 별도 ack frame은 없다
 - 결과는 `0x5F7`에서 확인해야 한다
+- profile 변경은 `disarmed` 상태에서만 적용된다
+- `As5600` 변경은 전환 시점에 AS5600 절대각을 읽을 수 있어야 성공한다
 
 즉 상위 제어기는:
 
-1. profile command 전송
-2. `0x5F7` 재확인
-3. stored/active가 기대값인지 확인
+1. `0x237#00`으로 disarm
+2. `0x5F7`에서 armed bit가 `0`인지 확인
+3. profile command 전송
+4. `0x5F7` 재확인
+5. stored/active가 기대값인지 확인
+6. 실패하면 `profile_select_result` 코드를 확인
 
 순서로 처리해야 한다.
 
@@ -267,7 +272,8 @@ power-stage command:
 
 - `output_min_deg/output_max_deg` 변경은 disarmed 상태에서만 허용된다
 - gear ratio 변경도 disarmed 상태에서만 허용된다
-- armed 상태에서 설정 변경 프레임을 보내도 펌웨어는 적용하지 않는다
+- profile 변경도 disarmed 상태에서만 허용된다
+- armed 상태에서 설정/profile 변경 프레임을 보내도 펌웨어는 적용하지 않는다
 - 상위 제어기는 설정 변경 전 반드시 `0x237#00`을 보내고 `0x5F7` armed bit가 `0`인지 확인해야 한다
 
 ## 8. 상위 제어기의 명령 채널 사용법
@@ -328,8 +334,18 @@ power-stage command:
 - `data[2]` = active profile
 - `data[4]` = velocity mode enable
 - `data[5]` = angle mode enable
-- `data[6]` = need_calibration
+- `data[6]` bit0 = need_calibration
+- `data[6]` bits4..7 = last profile-select result
 - `data[7] bit1` = power stage armed
+
+Profile-select result:
+
+- `0` = `None`
+- `1` = `Ok`
+- `2` = `RejectedArmed`
+- `3` = `As5600ReadFailed`
+- `4` = `NotSelectable`
+- `5` = `SaveFailed`
 
 권장 해석:
 
@@ -451,6 +467,8 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 원인 후보:
 
 - active profile이 실제로 안 바뀜
+- armed 상태에서 profile 변경을 보냄
+- `As5600ReadFailed`: AS5600 I2C/배선/자석 상태 문제
 - calibration 미완료
 - 현재 시스템이 `DirectInput` 조건이 아님
 

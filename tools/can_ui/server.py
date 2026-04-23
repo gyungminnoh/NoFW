@@ -28,6 +28,14 @@ CONTROL_MODE_NAMES = {
     1: "OutputAngle",
     2: "OutputVelocity",
 }
+PROFILE_SELECT_RESULT_NAMES = {
+    0: "None",
+    1: "Ok",
+    2: "RejectedArmed",
+    3: "As5600ReadFailed",
+    4: "NotSelectable",
+    5: "SaveFailed",
+}
 
 FRAME_RE = re.compile(
     r"^(?:\((?P<timestamp>[0-9.]+)\)\s+)?"
@@ -320,6 +328,8 @@ class CanUiBridge:
         if len(data) < 8:
             return {"raw_hex": payload_hex}
         flags = data[7]
+        need_and_profile = data[6]
+        profile_result_code = (need_and_profile >> 4) & 0x0F
         return {
             "magic": data[0],
             "stored_profile_code": data[1],
@@ -332,7 +342,11 @@ class CanUiBridge:
             ),
             "enable_velocity_mode": bool(data[4]),
             "enable_output_angle_mode": bool(data[5]),
-            "need_calibration": bool(data[6]),
+            "need_calibration": bool(need_and_profile & 0x01),
+            "profile_select_result_code": profile_result_code,
+            "profile_select_result": PROFILE_SELECT_RESULT_NAMES.get(
+                profile_result_code, f"Unknown({profile_result_code})"
+            ),
             "output_feedback_required": bool(flags & 0x01),
             "armed": bool(flags & 0x02),
         }
@@ -411,6 +425,11 @@ class CanUiBridge:
     def set_profile(self, profile_name: str) -> None:
         if profile_name not in PROFILE_CODES:
             raise ValueError("unsupported profile")
+        self._require_disarmed("profile change")
+        with self._lock:
+            self._command_mode = None
+            self._command_value = 0.0
+            self._stream_enabled = False
         self.send_one_shot("profile", profile_name)
 
     def set_power(self, armed: bool) -> None:

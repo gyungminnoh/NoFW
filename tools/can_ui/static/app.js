@@ -19,6 +19,7 @@ const stateEls = {
   angleEnabled: document.getElementById("angleEnabled"),
   velocityEnabled: document.getElementById("velocityEnabled"),
   needCalibration: document.getElementById("needCalibration"),
+  profileResult: document.getElementById("profileResult"),
   armedState: document.getElementById("armedState"),
   diagRaw: document.getElementById("diagRaw"),
   actuatorConfigRaw: document.getElementById("actuatorConfigRaw"),
@@ -197,11 +198,37 @@ function updateProfileFeedback(diag, linkAlive) {
   const elapsedMs = performance.now() - pendingProfileRequest.requestedAt;
   const storedProfile = diag.stored_profile || null;
   const activeProfile = diag.active_profile || null;
+  const profileResult = diag.profile_select_result || "None";
+  const failureResultReady = elapsedMs > 300;
 
   if (storedProfile === target && activeProfile === target) {
     profileFeedback = {
       text: `Profile applied: ${target}`,
       kind: "good",
+    };
+    pendingProfileRequest = null;
+  } else if (failureResultReady && profileResult === "RejectedArmed") {
+    profileFeedback = {
+      text: "Profile not applied: disarm before changing profile.",
+      kind: "bad",
+    };
+    pendingProfileRequest = null;
+  } else if (failureResultReady && profileResult === "As5600ReadFailed") {
+    profileFeedback = {
+      text: "Profile not applied: AS5600 could not be read at selection time.",
+      kind: "bad",
+    };
+    pendingProfileRequest = null;
+  } else if (failureResultReady && profileResult === "NotSelectable") {
+    profileFeedback = {
+      text: `Profile not applied: ${target} is not selectable with current calibration/config.`,
+      kind: "bad",
+    };
+    pendingProfileRequest = null;
+  } else if (failureResultReady && profileResult === "SaveFailed") {
+    profileFeedback = {
+      text: "Profile not applied: persistent config/calibration save failed.",
+      kind: "bad",
     };
     pendingProfileRequest = null;
   } else if (!linkAlive) {
@@ -374,6 +401,7 @@ function renderState(state) {
   stateEls.angleEnabled.textContent = fmtBool(diag.enable_output_angle_mode);
   stateEls.velocityEnabled.textContent = fmtBool(diag.enable_velocity_mode);
   stateEls.needCalibration.textContent = fmtBool(diag.need_calibration);
+  stateEls.profileResult.textContent = diag.profile_select_result || "-";
   stateEls.armedState.textContent = fmtBool(diag.armed);
   stateEls.diagRaw.textContent = diag.raw_hex || "-";
   stateEls.actuatorConfigRaw.textContent =
@@ -470,12 +498,14 @@ function renderState(state) {
     setPending(btn, isPending);
     setButtonEnabled(
       btn,
-      linkAlive && !isCurrent && !isPending,
+      linkAlive && !armed && !isCurrent && !isPending,
       !linkAlive
         ? "No live CAN frames"
-        : isPending
-          ? "Waiting for 0x5F7 to confirm this profile"
-          : "Already the active profile"
+        : armed
+          ? "Disarm before changing profile"
+          : isPending
+            ? "Waiting for 0x5F7 to confirm this profile"
+            : "Already the active profile"
     );
   }
 

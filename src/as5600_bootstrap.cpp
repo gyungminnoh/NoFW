@@ -82,5 +82,11 @@ static bool readAs5600AngleRadSamples_(int samples, int delay_ms, float& out_rad
 }
 
 bool readAs5600AngleRad(float& out_rad) {
-  return readAs5600AngleRadSamples_(5, 2, out_rad);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (readAs5600AngleRadSamples_(5, 2, out_rad)) {
+      return true;
+    }
+    delay(5);
+  }
+  return false;
 }

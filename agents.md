@@ -1836,6 +1836,65 @@ The highest-priority remaining tasks are now:
 2. If response is still too slow, consider accepting about `2 deg` overshoot and move to the more aggressive `Kp = 1.8`, angle slew `240` candidate.
 3. If overshoot is visually objectionable, keep `Kp = 1.5` and tune a real braking/trajectory profile rather than raising Kp further.
 
+Latest implementation step completed:
+
+- diagnosed why changing the profile to `As5600` from the web UI appeared not to work
+- first observed state:
+  - UI/backend was sending `0x227#01`
+  - firmware stayed in `VelocityOnly`
+  - power stage had previously been `armed = true`, where profile/config changes are intentionally ignored
+- after disarming and retrying, the profile still did not change with the old firmware, so the firmware lacked enough feedback to distinguish:
+  - `armed` rejection
+  - AS5600 read failure
+  - not-selectable profile
+  - FRAM save failure
+- firmware updates:
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+    - added last profile-select result reporting in runtime diag `0x5F7 data[6] bits4..7`
+    - result codes now include `Ok`, `RejectedArmed`, `As5600ReadFailed`, `NotSelectable`, and `SaveFailed`
+    - armed-state profile commands now record `RejectedArmed` instead of failing silently
+  - [src/as5600_bootstrap.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/as5600_bootstrap.cpp)
+    - AS5600 boot/profile reads now retry up to three sample groups before failing
+- UI/backend updates:
+  - [tools/can_ui/server.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/server.py)
+    - decodes the new profile-select result field
+    - rejects `/api/profile` while armed
+    - stops any active command stream before sending a profile change
+  - [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+    - disables profile buttons while armed
+    - displays explicit failure messages for `RejectedArmed`, `As5600ReadFailed`, `NotSelectable`, and `SaveFailed`
+  - [tools/can_ui/static/index.html](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/index.html)
+    - added a visible `Profile Result` row
+    - static asset cache-busting advanced to `v7`
+- documentation updated:
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+- hardware/UI validation completed:
+  - uploaded `custom_f446re` successfully
+  - restarted the local UI server on `http://127.0.0.1:8765`
+  - changed profile to `As5600` through the UI API
+  - final live state:
+    - stored profile = `As5600`
+    - active profile = `As5600`
+    - default mode = `OutputAngle`
+    - angle/velocity modes enabled
+    - `profile_select_result = Ok`
+    - `armed = false`
+    - stream off
+- verification passed:
+  - `pio run -e custom_f446re`
+  - `pio run -e custom_f446re -t upload`
+  - `python3 -m py_compile tools/can_ui/server.py tools/can_ui/smoke_test.py`
+  - `node --check tools/can_ui/static/app.js`
+  - `python3 tools/can_ui/smoke_test.py --use-running-server --port 8765` passed `30/30`
+
+The highest-priority remaining tasks are now:
+
+1. Continue manual web-UI motion testing from the confirmed `As5600` profile with `armed = false` until the user intentionally arms the driver.
+2. If the UI reports `As5600ReadFailed` later, inspect AS5600 wiring/magnet/I2C state before retuning motion behavior.
+3. If response is still too slow, retest the previously measured `Kp = 1.8`, angle slew `240` candidate and decide whether about `2 deg` overshoot is acceptable.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

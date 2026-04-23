@@ -75,6 +75,17 @@ constexpr float kMaxGearRatio = 1000.0f;
 constexpr float kMaxConfigAbsDeg = 1000000.0f;
 bool g_need_calibration = false;
 
+enum class ProfileSelectResult : uint8_t {
+  None = 0,
+  Ok = 1,
+  RejectedArmed = 2,
+  As5600ReadFailed = 3,
+  NotSelectable = 4,
+  SaveFailed = 5,
+};
+
+ProfileSelectResult g_last_profile_select_result = ProfileSelectResult::None;
+
 void clearCalibrationData() {
   ConfigStore::clearCalibrationBundleCompat();
 }
@@ -134,9 +145,11 @@ bool validGearRatio(float gear_ratio) {
          gear_ratio <= kMaxGearRatio;
 }
 
-bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle) {
+bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle,
+                          ProfileSelectResult& failure_result) {
   float angle_rad = 0.0f;
   if (!readAs5600AngleRad(angle_rad)) {
+    failure_result = ProfileSelectResult::As5600ReadFailed;
     return false;
   }
 
@@ -147,6 +160,7 @@ bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle) {
     bundle.as5600.invert = false;
     bundle.as5600.valid = true;
     if (!ConfigStore::saveCalibrationBundleCompat(bundle)) {
+      failure_result = ProfileSelectResult::SaveFailed;
       return false;
     }
   }
@@ -202,7 +216,8 @@ void sendRuntimeDiagIfDue() {
   data[3] = static_cast<uint8_t>(actuator_config.default_control_mode);
   data[4] = actuator_config.enable_velocity_mode ? 1 : 0;
   data[5] = actuator_config.enable_output_angle_mode ? 1 : 0;
-  data[6] = g_need_calibration ? 1 : 0;
+  data[6] = (g_need_calibration ? 0x01 : 0x00) |
+            (static_cast<uint8_t>(g_last_profile_select_result) << 4);
   data[7] = 0;
   if (outputEncoderRequired(actuator_config)) {
     data[7] |= 0x01;
@@ -324,18 +339,21 @@ bool applyActuatorGearConfig(float gear_ratio, float current_motor_mt_rad) {
 }
 
 bool selectOutputProfile(OutputEncoderType profile) {
+  g_last_profile_select_result = ProfileSelectResult::None;
   ConfigStore::CalibrationBundle calibration_bundle = {};
   ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
   if (profile == OutputEncoderType::As5600 &&
-      !prepareAs5600Profile(calibration_bundle)) {
+      !prepareAs5600Profile(calibration_bundle, g_last_profile_select_result)) {
     return false;
   }
   if (!isOutputProfileSelectable(calibration_bundle, profile)) {
+    g_last_profile_select_result = ProfileSelectResult::NotSelectable;
     return false;
   }
 
   applyOutputProfileDefaults(actuator_config, profile);
   if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    g_last_profile_select_result = ProfileSelectResult::SaveFailed;
     return false;
   }
 
@@ -350,6 +368,7 @@ bool selectOutputProfile(OutputEncoderType profile) {
       &sensor);
   g_need_calibration = !hasRequiredMotionCalibration(calibration_bundle, actuator_config);
   refreshBootReference();
+  g_last_profile_select_result = ProfileSelectResult::Ok;
   return true;
 }
 
@@ -905,6 +924,7 @@ void loop() {
   OutputEncoderType requested_profile = OutputEncoderType::As5600;
   if (CanService::takePendingOutputProfileChange(requested_profile)) {
     // Profile/config changes are intentionally ignored while armed.
+    g_last_profile_select_result = ProfileSelectResult::RejectedArmed;
   }
 
   float requested_output_min_deg = 0.0f;
