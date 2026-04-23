@@ -155,6 +155,57 @@ inner velocity PI는 일단 변경하지 않았다.
 
 판정: `pvc.Kp = 1.5`가 현재 overshoot 억제 기준에서는 더 적절하다.
 
+### `pvc.Kp = 1.5` 대각도 재검증
+
+`-60 deg` step:
+
+- overshoot: `0.175 deg`
+- tail error: `-0.094 deg`
+- max absolute velocity: `48.395 deg/s`
+
+`+120 deg` step:
+
+- overshoot: `16.697 deg`
+- tail error: `-0.006 deg`
+- max absolute velocity: `81.958 deg/s`
+
+판정: `±60 deg` 수준에서는 안정적이었지만, `+120 deg` 대각도 이동에서는 목표 근처 감속이 늦어 overshoot가 과도했다.
+
+### `pvc.Kp = 1.0` 대각도 재검증
+
+대각도 overshoot 억제를 우선해 outer angle P gain을 한 번 더 낮췄다.
+
+`+120 deg` step:
+
+- overshoot: `0.111 deg`
+- tail error: `0.062 deg`
+- max absolute velocity: `68.060 deg/s`
+
+`-120 deg` step:
+
+- target이 `output_min_deg = 0` 아래로 내려가 펌웨어가 정상적으로 `0 deg` 리밋에 클램프했다.
+- 이 결과는 음방향 step 응답 판정값으로 사용하지 않는다.
+
+`+100 deg` step:
+
+- overshoot: `0.028 deg`
+- tail error: `0.003 deg`
+- max absolute velocity: `58.667 deg/s`
+
+`-80 deg` step:
+
+- overshoot: `0.112 deg`
+- tail error: `-0.063 deg`
+- max absolute velocity: `48.669 deg/s`
+
+`+10 deg` step:
+
+- overshoot: `0.019 deg`
+- tail error: `0.002 deg`
+- max absolute velocity: `6.702 deg/s`
+
+판정: `pvc.Kp = 1.0`은 작은 step과 대각도 step 모두에서 overshoot와 tail error가 작다. 현재 검증 범위에서는 `pvc.Kp = 1.5`보다 더 안전한 설정이다.
+
 ## 적용한 최종 계수
 
 ```cpp
@@ -163,13 +214,13 @@ motor.PID_velocity.I = 0.4;
 motor.PID_velocity.D = 0.0;
 motor.LPF_velocity.Tf = 0.007;
 
-pvc.Kp = 1.5f;
+pvc.Kp = 1.0f;
 ```
 
 ## 결론
 
 현재 문제의 주된 원인은 velocity PI보다 outer angle P gain이었다.
 
-`pvc.Kp`를 `20.0 -> 2.0 -> 1.5`로 낮춘 뒤, `±30 deg`와 `+60 deg` step에서 overshoot가 충분히 작게 유지됐다.
+`pvc.Kp`를 `20.0 -> 2.0 -> 1.5 -> 1.0`으로 낮춘 뒤, `+10 deg`, `+100 deg`, `+120 deg`, `-80 deg` step에서 overshoot가 충분히 작게 유지됐다.
 
-추가 고속/대각도 튜닝 전에는 UI 또는 CAN status에서 `output_min_deg`, `output_max_deg`, gear ratio를 볼 수 있게 만드는 것이 우선이다.
+추가 고속/대각도 튜닝 전에는 UI 또는 CAN status에서 `output_min_deg`, `output_max_deg`, gear ratio를 볼 수 있게 만드는 것이 우선이다. 특히 음방향 대각도 테스트는 `output_min_deg = 0` 클램프에 걸리지 않는 시작 위치와 목표 위치를 먼저 확인해야 한다.

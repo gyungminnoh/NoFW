@@ -1618,6 +1618,41 @@ The highest-priority remaining tasks are now:
 2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
 3. If the user still sees overshoot at a specific command, capture the exact start angle, target angle, direction, and command sequence, then reproduce it with `tools/control_tuning/can_step_response.py`.
 
+Latest implementation step completed:
+
+- continued AS5048A multi-turn based angle PID tuning without adding new AS5600 runtime telemetry
+- confirmed initial board/UI state before motion:
+  - active profile `As5600`
+  - `armed = false`
+  - command stream off
+- measured `pvc.Kp = 1.5` large-step behavior:
+  - `-60 deg`: overshoot about `0.175 deg`, tail error about `-0.094 deg`
+  - `+120 deg`: overshoot about `16.697 deg`, tail error about `-0.006 deg`
+- identified the large-step problem as target-near deceleration lag caused by the outer P command interacting with the angle-mode velocity command ramp
+- changed angle outer-loop gain:
+  - `pvc.Kp = 1.5f -> 1.0f`
+- built and uploaded the firmware:
+  - `pio run -e custom_f446re`
+  - `pio run -e custom_f446re -t upload`
+- measured `pvc.Kp = 1.0` response:
+  - `+120 deg`: overshoot about `0.111 deg`, tail error about `0.062 deg`
+  - `+100 deg`: overshoot about `0.028 deg`, tail error about `0.003 deg`
+  - `-80 deg`: overshoot about `0.112 deg`, tail error about `-0.063 deg`
+  - `+10 deg`: overshoot about `0.019 deg`, tail error about `0.002 deg`
+- noted that a `-120 deg` command from about `69.7 deg` correctly clamped at the configured `output_min_deg = 0`, so that run is not a free negative-step response measurement
+- final checked board/UI state:
+  - active profile `As5600`
+  - `armed = false`
+  - command stream off
+- updated tuning report:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before more manual angle tests, because `output_min_deg = 0` can silently clamp negative targets.
+2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
+3. If faster large-angle moves are needed later, tune angle-mode velocity profiling separately instead of increasing `pvc.Kp` first.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
