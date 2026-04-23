@@ -1156,6 +1156,225 @@ The highest-priority remaining tasks are now:
 2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
 3. If future control-policy changes are made, update the implementation-facing docs and user-facing docs in the same step.
 
+Latest implementation step completed:
+
+- added a dedicated integration guide for upper-layer controllers such as `Jetson`:
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+- the new document focuses on what the upper layer must know:
+  - boot-safe `disarmed` startup and explicit `arm` requirement
+  - distinction between profile selection and runtime feedback/status source
+  - angle-command clamp against stored travel limits
+  - different semantics of `velocity mode` vs `angle mode`
+  - `100 ms` timeout behavior and recommended command-stream rate
+  - required interpretation of `0x407`, `0x417`, `0x5F7`
+  - lack of separate ack for profile changes
+  - recommended upper-layer state machine and startup procedure
+  - explicit warning that `0x5F7 data[3]` is `default_control_mode`, not current active control mode
+
+The highest-priority remaining tasks are now:
+
+1. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+2. Keep the current boot-safe arm/disarm behavior, corrected ratio, arm-no-jump behavior, stabilized `0x417` status path, and settled-window velocity sweep as regression checks.
+3. If future control-policy changes are made, update the integration-facing docs and user-facing docs in the same step.
+
+Latest implementation step completed:
+
+- created a local web UI MVP for CAN-based manual testing:
+  - server:
+    - [tools/can_ui/server.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/server.py)
+  - frontend:
+    - [tools/can_ui/static/index.html](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/index.html)
+    - [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+    - [tools/can_ui/static/styles.css](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/styles.css)
+- UI scope:
+  - session selection (`can_iface`, `node_id`)
+  - runtime diag decoding
+  - profile switching
+  - power-stage arm/disarm
+  - angle / velocity command entry
+  - latched command streaming at about `20 Hz`
+  - hold-current / zero-velocity helpers
+  - optional raw frame send panel
+  - event log
+- documented the UI MVP in:
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+- linked the UI from the user-facing docs:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/manual_can_test_checklist.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/manual_can_test_checklist.md)
+- verification completed:
+  - `python3 -m py_compile tools/can_ui/server.py` passed
+  - `python3 tools/can_ui/server.py --help` passed
+  - started the server locally on port `8876`
+  - confirmed `/api/state` returned live decoded angle / velocity / diag values from `can0`
+  - test server process was then terminated
+
+The highest-priority remaining tasks are now:
+
+1. Run an end-to-end manual test through the new web UI and refine any usability issues in the control flow.
+2. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+3. If future control-policy changes are made, update the UI behavior and related docs in the same step.
+
+Latest implementation step completed:
+
+- improved the CAN web UI so users can visually distinguish clickable vs non-clickable actions and current pressed/selected state
+- updated:
+  - [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+  - [tools/can_ui/static/styles.css](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/styles.css)
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+- UI behavior changes:
+  - `Arm` disabled when already armed
+  - `Disarm` disabled when already disarmed
+  - angle buttons disabled when current profile does not allow angle mode
+  - velocity buttons disabled when current profile does not allow velocity mode
+  - profile button for the currently active profile disabled and shown as selected
+  - current latched stream mode shown as selected on the corresponding command button
+  - preset buttons shown as selected when their value matches the current input
+  - buttons now expose disabled reasons through `title`
+- verification:
+  - backend still passes `python3 -m py_compile tools/can_ui/server.py`
+  - server still starts and `/api/state` returns live decoded CAN status after the frontend-only change
+
+The highest-priority remaining tasks are now:
+
+1. Run an end-to-end manual test through the new web UI and refine any remaining usability issues in the control flow.
+2. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+3. If future control-policy changes are made, update the UI behavior and related docs in the same step.
+
+Latest implementation step completed:
+
+- cleaned up duplicate local CAN UI server instances that had been left running on ports `8876` and `8877`
+- relaunched a single canonical server instance on the documented port:
+  - `127.0.0.1:8765`
+- verified live backend state on the relaunched instance:
+  - `/api/state` returned `link_alive: true`
+  - session matched `can0`, `node_id = 7`
+  - live angle / velocity / diag fields were populated
+- current user-facing rule is now:
+  - use `http://127.0.0.1:8765`
+  - if the browser still does not show `LINK ALIVE`, first confirm the page is connected to that exact port and the session is `can0` / `7`
+
+The highest-priority remaining tasks are now:
+
+1. Run an end-to-end manual test through the single canonical web UI instance on port `8765` and refine any remaining usability issues in the control flow.
+2. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+3. If future control-policy changes are made, update the UI behavior and related docs in the same step.
+
+Latest implementation step completed:
+
+- launched the CAN web UI server directly:
+  - `python3 tools/can_ui/server.py --host 127.0.0.1 --port 8765 --can-iface can0 --node-id 7`
+- verified the physical board is connected through the UI backend:
+  - `can0` is `UP`, `ERROR-ACTIVE`, `1 Mbps`
+  - raw `candump` showed live `0x407`, `0x417`, and `0x5F7` frames
+  - `http://127.0.0.1:8765/api/state` returned:
+    - `link_alive: true`
+    - `angle_deg` populated
+    - `velocity_deg_s` populated
+    - `diag.raw_hex = FB02020101010001`
+    - stored/active profile = `TmagLut`
+    - `armed = false`
+- current UI server is running on:
+  - `http://127.0.0.1:8765`
+
+The highest-priority remaining tasks are now:
+
+1. Use the running web UI to perform an end-to-end manual control test and refine any remaining usability issues in the flow.
+2. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+3. If future control-policy changes are made, update the UI behavior and related docs in the same step.
+
+Latest implementation step completed:
+
+- diagnosed why the browser showed `Link = UNKNOWN` even though CAN traffic was present
+- root cause:
+  - frontend JavaScript syntax errors in [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+  - because the script failed to execute, the HTML stayed at its initial `UNKNOWN` text
+- fixes applied:
+  - corrected the broken `addEventListener(...)` callback parentheses in `app.js`
+  - added `?v=2` cache-busting to the static script/style references in
+    [tools/can_ui/static/index.html](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/index.html)
+  - added `Cache-Control: no-store` to JSON/static responses in
+    [tools/can_ui/server.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/server.py)
+- verification:
+  - `node --check tools/can_ui/static/app.js` passed
+  - `python3 -m py_compile tools/can_ui/server.py` passed
+  - restarted the UI server on `http://127.0.0.1:8765`
+  - confirmed the served HTML now references `app.js?v=2`
+  - `/api/state` returns `link_alive: true` with live decoded board state
+
+The highest-priority remaining tasks are now:
+
+1. Reload the browser against `http://127.0.0.1:8765` and run an end-to-end manual control test through the fixed web UI.
+2. Keep the upper-layer integration guide, manual checklist, and user guide aligned with firmware behavior as new changes are made.
+3. If future control-policy changes are made, update the UI behavior and related docs in the same step.
+
+Latest implementation step completed:
+
+- fixed unreliable entry into `As5600` profile in the main firmware
+- root cause:
+  - `As5600` profile selection required an already-valid stored `AS5600` calibration
+  - this prevented first-time entry even when the physical `AS5600` sensor was readable
+- firmware behavior now:
+  - when `As5600` profile is requested, the firmware first tries to read the physical `AS5600`
+  - if no stored `AS5600` zero exists and the sensor read succeeds, the current `AS5600` absolute angle is saved as the first `0 deg` reference
+  - existing stored `AS5600` zero is not overwritten by profile switching
+  - if the `AS5600` read fails, profile selection still fails and stored/active profile does not change
+- uploaded the fixed firmware with:
+  - `pio run -e custom_f446re -t upload`
+- hardware/CAN validation completed:
+  - stopped the UI latched velocity stream before testing
+  - confirmed `can0` is `UP`, `ERROR-ACTIVE`, `1 Mbps`
+  - confirmed board link through `0x5F7`
+  - sent direct CAN profile command `cansend can0 227#01`
+  - observed `0x5F7#FB01010101010001`
+  - decoded result:
+    - stored profile = `As5600`
+    - active profile = `As5600`
+    - default control mode = `OutputAngle`
+    - velocity mode enabled = `true`
+    - output angle mode enabled = `true`
+    - output feedback required = `true`
+    - armed = `false`
+  - verified UI API profile switching also works by changing `VelocityOnly -> As5600`
+- updated docs to explain first-time `As5600` zero bootstrap behavior:
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - [docs/manual_can_test_checklist.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/manual_can_test_checklist.md)
+
+The highest-priority remaining tasks are now:
+
+1. Run the browser-based manual control test in `As5600` profile while staying disarmed until the user intentionally arms the driver.
+2. If profile switching still feels ambiguous in the UI, add explicit command-result feedback that compares the requested profile against the next observed `0x5F7` status.
+3. Keep the upper-layer integration guide, manual checklist, user guide, and UI behavior aligned with firmware behavior as new changes are made.
+
+Latest implementation step completed:
+
+- improved the CAN web UI profile-switching feedback
+- problem addressed:
+  - profile POST responses can contain the previous diag snapshot because `0x5F7` updates asynchronously
+  - this could make a successful profile request look like it did not apply yet
+- UI behavior now:
+  - profile requests show an explicit pending message
+  - the requested profile button is marked pending while waiting for the next matching `0x5F7`
+  - success is shown only when both stored profile and active profile match the requested profile
+  - if the requested profile does not appear within about `2.5 s`, the UI shows a failure message with the current active profile
+- changed files:
+  - [tools/can_ui/static/index.html](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/index.html)
+  - [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+  - [tools/can_ui/static/styles.css](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/styles.css)
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+- verification:
+  - `node --check tools/can_ui/static/app.js` passed
+  - `python3 -m py_compile tools/can_ui/server.py` passed
+  - `pio run -e custom_f446re` passed
+  - running UI server serves `app.js?v=3` and `styles.css?v=3`
+  - `/api/state` still reports `link_alive: true`, active profile `As5600`, and `armed = false`
+
+The highest-priority remaining tasks are now:
+
+1. Run the browser-based manual control test in `As5600` profile while staying disarmed until the user intentionally arms the driver.
+2. If the user intends to command motion next, confirm the driver should be armed and start with conservative small angle/velocity commands.
+3. Keep the upper-layer integration guide, manual checklist, user guide, and UI behavior aligned with firmware behavior as new changes are made.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

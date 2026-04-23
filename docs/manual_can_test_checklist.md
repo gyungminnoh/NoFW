@@ -3,6 +3,11 @@
 이 문서는 사용자가 터미널에서 `cansend`, `candump`를 직접 사용해
 프로파일 변경부터 실제 모터 구동까지 수동으로 확인할 때 쓰는 체크리스트다.
 
+만약 직접 hex payload를 다루는 과정이 불편하면, 먼저 다음 문서를 보고
+로컬 웹 UI를 실행한 뒤 같은 테스트를 UI에서 수행해도 된다.
+
+- [can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+
 목표는 다음 세 가지다.
 
 - 현재 보드가 정상적으로 `CAN`에 응답하는지 확인
@@ -104,6 +109,8 @@ candump can0,5F7:7FF
 
 - stored/active profile이 `1`로 보인다
 - angle mode와 velocity mode가 둘 다 가능해야 한다
+- 저장된 `AS5600` zero가 없던 보드라면, 이 명령을 보낸 순간의 `AS5600` 절대각이 첫 `0 deg` 기준으로 저장된다
+- stored/active가 `1`로 바뀌지 않으면 `AS5600` 센서 read 실패를 먼저 의심한다
 
 ### 3.3 `TmagLut`
 

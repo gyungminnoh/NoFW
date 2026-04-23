@@ -1,0 +1,401 @@
+# 상위 제어기 연동 가이드
+
+이 문서는 `Jetson` 같은 상위 제어기가 이 펌웨어가 올라간 모터드라이버를 제어할 때
+반드시 알아야 하는 계약 사항을 정리한 문서다.
+
+목표는 다음 세 가지다.
+
+- 상위 제어기가 무엇을 명령할 수 있는지 명확히 한다
+- 어떤 상태를 읽고 무엇을 믿어야 하는지 정리한다
+- 부팅, profile 변경, arm/disarm, 정상 운전, 오류 대응의 기본 절차를 정의한다
+
+## 1. 상위 제어기가 제어하는 대상은 무엇인가
+
+이 펌웨어의 외부 제어 좌표계는 항상 출력축 기준이다.
+
+즉 상위 제어기는 다음 두 채널만 알면 된다.
+
+- 출력축 각도 command/status: `deg`
+- 출력축 속도 command/status: `deg/s`
+
+온와이어 인코딩은 둘 다 little-endian `int32`이고 스케일은 `0.001`이다.
+
+- angle payload = `mdeg`
+- velocity payload = `mdeg/s`
+
+## 2. 상위 제어기가 반드시 알아야 하는 핵심 정책
+
+### 2.1 Boot-safe 정책
+
+- 보드 전원을 넣어도 power stage는 자동으로 올라오지 않는다
+- 기본 상태는 `disarmed`다
+- 실제 모터 구동 전에는 반드시 별도의 `arm` 명령이 필요하다
+
+즉 상위 제어기는:
+
+1. 보드가 살아 있는지 확인하고
+2. profile/calibration 상태를 확인하고
+3. 명시적으로 `arm`한 뒤
+4. 그 다음에만 angle/velocity command를 보내야 한다
+
+### 2.2 Profile과 런타임 feedback은 같은 개념이 아니다
+
+현재 profile의 의미는 주로:
+
+- 부팅 시 출력축 `0 deg` 기준을 어떤 경로로 맞출지
+- 어떤 제어 모드를 허용할지
+
+를 결정하는 것이다.
+
+하지만 런타임 FOC와 CAN status는 현재 코드 기준으로:
+
+- 입력축 `AS5048A` multi-turn 추정
+
+을 사용한다.
+
+즉 상위 제어기는 다음을 구분해야 한다.
+
+- `profile`:
+  - boot-time output reference 경로
+  - angle/velocity mode 허용 여부
+- `runtime status 0x407 / 0x417`:
+  - output-axis 단위로 변환된 motor-side multi-turn 추정값
+
+### 2.3 Angle command는 travel limit로 clamp된다
+
+현재 저장된:
+
+- `output_min_deg`
+- `output_max_deg`
+
+바깥으로 큰 angle command를 보내도 내부 target은 clamp된다.
+
+즉 상위 제어기는:
+
+- 큰 각도 명령을 보냈는데 기대한 각도까지 안 갔다면
+- 먼저 travel limit clamp를 의심해야 한다
+
+### 2.4 Velocity mode와 Angle mode 정책이 다르다
+
+- velocity mode:
+  - 출력축 속도 명령을 따른다
+  - 내부 slew limit는 적용된다
+  - 현재 정책상 angle travel edge 기준 braking은 따로 하지 않는다
+- angle mode:
+  - 출력축 각도 목표를 outer loop로 추종한다
+  - travel edge 근처에서 edge-braking cap이 적용된다
+  - 그 뒤 최종 velocity command에도 추가 slew limit가 한 번 더 걸린다
+
+즉 상위 제어기는:
+
+- velocity mode를 "속도 우선 채널"
+- angle mode를 "목표 위치 우선 채널"
+
+로 이해하는 편이 맞다.
+
+### 2.5 Timeout 정책
+
+현재 `CAN_TIMEOUT_MS = 100 ms`다.
+
+첫 유효 제어 명령을 받은 뒤 timeout 로직이 활성화된다.
+
+- 현재 모드가 `OutputAngle`이면:
+  - timeout 시 현재 각도를 hold target으로 잡는다
+- 현재 모드가 `OutputVelocity`이면:
+  - timeout 시 목표 속도를 `0 deg/s`로 강제한다
+
+즉 상위 제어기는 명령을 단발로 던지는 것이 아니라,
+운전 중에는 주기적으로 command를 갱신해야 한다.
+
+권장:
+
+- 최소 `10 Hz`보다 충분히 빠르게 보낸다
+- 실사용에서는 `20 Hz` 이상으로 보내는 편이 안전하다
+
+## 3. CAN 인터페이스에서 상위 제어기가 알아야 할 것
+
+기본 `node_id = 7`이면 다음 ID를 사용한다.
+
+- angle cmd: `0x207`
+- angle status: `0x407`
+- velocity cmd: `0x217`
+- velocity status: `0x417`
+- profile cmd: `0x227`
+- power-stage cmd: `0x237`
+- runtime diag: `0x5F7`
+
+버스 조건:
+
+- `1 Mbps`
+- `11-bit standard ID`
+- little-endian
+
+## 4. 상위 제어기 상태기계에서 꼭 가져가야 하는 개념
+
+상위 제어기는 최소한 아래 상태를 자체적으로 관리하는 편이 좋다.
+
+- `link_alive`
+- `profile_known`
+- `profile_ready`
+- `armed`
+- `control_mode`
+- `streaming_ok`
+
+권장 정의:
+
+- `link_alive`:
+  - 최근 `0x5F7` 또는 status frame이 보이는가
+- `profile_known`:
+  - `0x5F7`에서 stored/active profile을 읽었는가
+- `profile_ready`:
+  - 원하는 profile이 active로 적용되었고 `need_calibration = 0`인가
+- `armed`:
+  - `0x5F7 data[7] bit1 == 1`인가
+- `control_mode`:
+  - 현재 펌웨어가 별도 active-mode status를 주지 않으므로
+  - 상위 제어기가 마지막으로 성공적으로 보낸 command 종류를 기준으로 관리
+- `streaming_ok`:
+  - timeout을 피할 만큼 주기적으로 command를 보내고 있는가
+
+중요:
+
+- `0x5F7 data[3]`은 현재 active control mode가 아니다
+- 이것은 `default_control_mode`다
+- 현재 active angle/velocity 모드는 상위 제어기가 마지막 제어 명령 종류로 관리해야 한다
+
+## 5. 부팅 직후 상위 제어기의 권장 절차
+
+권장 시퀀스:
+
+1. `CAN` 링크가 살아 있는지 확인
+2. `0x5F7`를 읽어 stored/active profile, `need_calibration`, armed bit 확인
+3. 원하는 profile이 아니면 `0x227`로 변경 요청
+4. 다시 `0x5F7`를 읽어 active profile이 바뀌었는지 확인
+5. 필요한 경우에만 `0x237#01`로 arm
+6. 작은 command로 방향과 반응 확인
+7. 정상 확인 후 본 운전으로 들어감
+
+권장 판정:
+
+- `need_calibration = 1`이면 angle-capable profile 사용 전 보정 문제를 먼저 해결
+- active profile이 기대값으로 바뀌지 않으면 상위 제어기는 운전을 시작하지 말아야 한다
+
+## 6. Profile 변경 시 상위 제어기가 알아야 할 것
+
+profile command:
+
+- `0x227#00` = `VelocityOnly`
+- `0x227#01` = `As5600`
+- `0x227#02` = `TmagLut`
+- `0x227#03` = `DirectInput`
+
+행동 규칙:
+
+- profile 변경은 메인 펌웨어가 즉시 적용을 시도한다
+- 동시에 `FRAM`에 저장된다
+- 별도 ack frame은 없다
+- 결과는 `0x5F7`에서 확인해야 한다
+
+즉 상위 제어기는:
+
+1. profile command 전송
+2. `0x5F7` 재확인
+3. stored/active가 기대값인지 확인
+
+순서로 처리해야 한다.
+
+### Profile별 의미
+
+#### `VelocityOnly`
+
+- 출력축 절대각 기준 없음
+- 속도제어만 가능
+- angle command는 기대하지 말아야 한다
+
+#### `As5600`
+
+- `AS5600` 기반 boot zero/reference
+- angle/velocity 모두 가능
+
+#### `TmagLut`
+
+- `TMAG LUT` 기반 boot zero/reference
+- calibration이 선행되어야 함
+- angle/velocity 모두 가능
+
+#### `DirectInput`
+
+- `gear_ratio == 1:1` 시스템용
+- 입력축 엔코더를 출력축 엔코더로 직접 사용
+- angle/velocity 모두 가능
+
+## 7. Arm / Disarm 계약
+
+power-stage command:
+
+- `0x237#01` = arm
+- `0x237#00` = disarm
+
+상위 제어기가 알아야 할 점:
+
+- arm 전에는 상태 프레임은 볼 수 있어도 실제 구동은 되지 않는다
+- arm을 해야 gate enable과 `initFOC()`가 수행된다
+- disarm하면 실제 전력단이 내려간다
+- 현재 리비전에서는 arm 자체가 출력축 기준을 다시 틀어버리지 않도록 수정되어 있다
+
+권장:
+
+- 상위 제어기는 "명령 보냈으니 움직이겠지"라고 가정하지 말고
+- `0x5F7` armed bit를 보고 arm 완료를 판단해야 한다
+
+## 8. 상위 제어기의 명령 채널 사용법
+
+### 8.1 Angle command
+
+- ID: `0x200 + node_id`
+- payload: `int32 mdeg`
+
+예:
+
+- `10.000 deg` = `0x207#10270000`
+- `0 deg` = `0x207#00000000`
+
+사용 원칙:
+
+- 처음에는 작은 각도 명령으로 방향 확인
+- 큰 양/음의 값은 실제로는 travel limit에 의해 clamp될 수 있음
+
+### 8.2 Velocity command
+
+- ID: `0x210 + node_id`
+- payload: `int32 mdeg/s`
+
+예:
+
+- `10.000 deg/s` = `0x217#10270000`
+- `0 deg/s` = `0x217#00000000`
+
+사용 원칙:
+
+- velocity mode는 내부 slew limit가 있으므로 step command가 즉시 같은 motor demand로 가지는 않는다
+- 현재 정책상 angle travel edge를 기준으로 별도 braking 하지 않으므로 작은 명령부터 시작하는 편이 안전하다
+
+## 9. 상위 제어기가 읽어야 하는 상태
+
+### 9.1 `0x407`
+
+- 현재 출력축 각도 상태
+- 단위: `deg`
+- 송신 주기 기본값: `50 ms`
+
+### 9.2 `0x417`
+
+- 현재 출력축 속도 상태
+- 단위: `deg/s`
+- 송신 주기 기본값: `50 ms`
+
+### 9.3 `0x5F7`
+
+- runtime diagnostic
+- 송신 주기 기본값: `500 ms`
+
+상위 제어기가 주로 볼 필드:
+
+- `data[1]` = stored profile
+- `data[2]` = active profile
+- `data[4]` = velocity mode enable
+- `data[5]` = angle mode enable
+- `data[6]` = need_calibration
+- `data[7] bit1` = power stage armed
+
+권장 해석:
+
+- `0x407/0x417`:
+  - 제어 상태 관찰용
+- `0x5F7`:
+  - 운전 가능 여부, profile 상태, arm 상태 확인용
+
+## 10. 상위 제어기에서 권장하는 최소 통합 절차
+
+### 10.1 연결 시
+
+1. `0x5F7` 수신 대기
+2. 원하는 profile과 calibration 상태 확인
+3. 필요하면 profile 변경
+4. 다시 `0x5F7`로 적용 확인
+
+### 10.2 구동 시작 시
+
+1. `arm`
+2. armed bit 확인
+3. 작은 command 1회 전송
+4. `0x407/0x417`로 반응 확인
+5. 정상일 때만 본 운전 command stream 시작
+
+### 10.3 구동 중
+
+1. command를 timeout보다 빠르게 주기적으로 보냄
+2. `0x407/0x417` 감시
+3. `0x5F7` armed bit와 calibration 상태 감시
+
+### 10.4 정지 시
+
+1. velocity mode라면 먼저 `0 deg/s`
+2. 필요하면 `disarm`
+3. `0x5F7`에서 armed bit가 0으로 돌아왔는지 확인
+
+## 11. 상위 제어기가 피해야 할 가정
+
+- profile이 runtime output feedback source라고 가정하면 안 된다
+- `0x5F7 data[3]`을 current active control mode라고 해석하면 안 된다
+- board power-on만으로 모터가 구동 가능하다고 가정하면 안 된다
+- 큰 angle command가 항상 그 값까지 도달한다고 가정하면 안 된다
+- profile command에 별도 ack가 온다고 가정하면 안 된다
+
+## 12. 통합 시 흔한 실패 원인
+
+### profile 변경 후 동작이 기대와 다름
+
+원인 후보:
+
+- active profile이 실제로 안 바뀜
+- calibration 미완료
+- 현재 시스템이 `DirectInput` 조건이 아님
+
+### command를 보냈는데 멈춰 버림
+
+원인 후보:
+
+- command stream 간격이 `100 ms`를 넘겨 timeout 발생
+- angle mode에서는 hold-current
+- velocity mode에서는 target zero
+
+### 전원은 살아 있는데 모터가 안 움직임
+
+원인 후보:
+
+- 아직 `disarmed`
+- 상위 제어기가 arm bit 확인 없이 command만 보내고 있음
+
+### 큰 angle command가 중간에서 멈춤
+
+원인 후보:
+
+- stored travel limit clamp
+
+## 13. 상위 제어기 구현 권장사항
+
+- 명령 송신 스레드와 상태 수신 스레드를 분리한다
+- `0x5F7` 기반의 명시적 상태기계를 둔다
+- control mode는 마지막 command 종류로 상위 제어기에서 직접 추적한다
+- timeout 대비를 위해 command stream 주기를 일정하게 유지한다
+- emergency stop 경로는 최소한 `disarm`을 바로 보낼 수 있게 만든다
+
+간단한 권장 우선순위:
+
+1. `0x5F7` 읽기
+2. profile 확인
+3. arm
+4. 작은 command
+5. 정상 확인 후 본 운전
+6. 종료 시 disarm

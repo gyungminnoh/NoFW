@@ -246,6 +246,9 @@ Payload:
 ### `As5600`
 
 - `AS5600`을 부팅 시 출력축 `0 deg` 기준 정렬과 zero capture에 사용
+- 저장된 `AS5600` zero가 없으면, profile 변경 시 현재 `AS5600` 절대각을 첫 `0 deg` 기준으로 저장한다
+- 저장된 `AS5600` zero가 이미 있으면 profile 변경만으로 기준점을 덮어쓰지 않는다
+- `AS5600` 센서 read가 실패하면 profile 변경은 적용되지 않는다
 
 ### `TmagLut`
 

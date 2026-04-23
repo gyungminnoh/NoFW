@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NoFW CAN Test UI</title>
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <h1>NoFW CAN Test UI</h1>
+        <p class="muted">
+          profile 변경, arm/disarm, angle/velocity command, runtime diag 확인을 위한 로컬 웹 UI
+        </p>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Session</h2>
+          <label>CAN Interface <input id="canIface" value="can0" /></label>
+          <label>Node ID <input id="nodeId" type="number" value="7" min="0" max="127" /></label>
+          <button id="applySessionBtn">Apply Session</button>
+          <p id="sessionInfo" class="mono"></p>
+        </div>
+        <div>
+          <h2>Link</h2>
+          <p id="linkState" class="status-pill unknown">UNKNOWN</p>
+          <p id="lastError" class="error-text"></p>
+          <p class="muted">상태는 약 250 ms 간격으로 자동 갱신됩니다.</p>
+        </div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Profiles</h2>
+          <div class="button-row">
+            <button class="profile-btn" data-profile="VelocityOnly">VelocityOnly</button>
+            <button class="profile-btn" data-profile="As5600">As5600</button>
+            <button class="profile-btn" data-profile="TmagLut">TmagLut</button>
+            <button class="profile-btn" data-profile="DirectInput">DirectInput</button>
+          </div>
+          <p id="profileFeedback" class="feedback muted">No profile request yet.</p>
+        </div>
+        <div>
+          <h2>Power Stage</h2>
+          <div class="button-row">
+            <button id="armBtn" class="primary">Arm</button>
+            <button id="disarmBtn" class="danger">Disarm</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Angle Command</h2>
+          <label>Target Deg <input id="angleInput" type="number" step="0.001" value="10" /></label>
+          <div class="button-row">
+            <button id="sendAngleBtn" class="primary">Set Angle</button>
+            <button id="holdCurrentBtn">Hold Current Angle</button>
+          </div>
+          <div class="preset-row">
+            <button class="angle-preset" data-value="0">0</button>
+            <button class="angle-preset" data-value="10">10</button>
+            <button class="angle-preset" data-value="-10">-10</button>
+            <button class="angle-preset" data-value="90">90</button>
+            <button class="angle-preset" data-value="5000">5000</button>
+          </div>
+        </div>
+        <div>
+          <h2>Velocity Command</h2>
+          <label>Target Deg/s <input id="velocityInput" type="number" step="0.001" value="10" /></label>
+          <div class="button-row">
+            <button id="sendVelocityBtn" class="primary">Set Velocity</button>
+            <button id="zeroVelocityBtn">Zero Velocity</button>
+          </div>
+          <div class="preset-row">
+            <button class="velocity-preset" data-value="0">0</button>
+            <button class="velocity-preset" data-value="10">10</button>
+            <button class="velocity-preset" data-value="-10">-10</button>
+            <button class="velocity-preset" data-value="30">30</button>
+            <button class="velocity-preset" data-value="-30">-30</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Latched Stream</h2>
+          <p id="streamInfo" class="mono"></p>
+          <button id="stopStreamBtn">Stop Streaming</button>
+        </div>
+        <div>
+          <h2>Raw Send</h2>
+          <label>CAN ID <input id="rawCanId" value="237" /></label>
+          <label>Payload Hex <input id="rawPayload" value="01" /></label>
+          <button id="sendRawBtn">Send Raw Frame</button>
+        </div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
+          <h2>Live Status</h2>
+          <table>
+            <tbody>
+              <tr><th>Angle</th><td id="angleStatus" class="mono">-</td></tr>
+              <tr><th>Velocity</th><td id="velocityStatus" class="mono">-</td></tr>
+              <tr><th>Stored Profile</th><td id="storedProfile" class="mono">-</td></tr>
+              <tr><th>Active Profile</th><td id="activeProfile" class="mono">-</td></tr>
+              <tr><th>Default Mode</th><td id="defaultMode" class="mono">-</td></tr>
+              <tr><th>Angle Enabled</th><td id="angleEnabled" class="mono">-</td></tr>
+              <tr><th>Velocity Enabled</th><td id="velocityEnabled" class="mono">-</td></tr>
+              <tr><th>Need Calibration</th><td id="needCalibration" class="mono">-</td></tr>
+              <tr><th>Armed</th><td id="armedState" class="mono">-</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h2>Runtime Diag Raw</h2>
+          <pre id="diagRaw">-</pre>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Event Log</h2>
+        <div id="eventLog" class="log-box"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js?v=3"></script>
+  </body>
+  </html>

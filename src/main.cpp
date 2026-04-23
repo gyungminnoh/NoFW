@@ -111,6 +111,26 @@ bool hasRequiredMotionCalibration(const ConfigStore::CalibrationBundle& bundle,
 
 bool readOutputEncoderAbsolute(float& out_angle_rad);
 
+bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle) {
+  float angle_rad = 0.0f;
+  if (!readAs5600AngleRad(angle_rad)) {
+    return false;
+  }
+
+  if (!bundle.as5600.valid) {
+    bundle.as5600 = {};
+    bundle.as5600.magic = kCalibrationRecordMagic;
+    bundle.as5600.zero_offset_rad = angle_rad;
+    bundle.as5600.invert = false;
+    bundle.as5600.valid = true;
+    if (!ConfigStore::saveCalibrationBundleCompat(bundle)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 uint16_t runtimeDiagCanId() {
   return kRuntimeDiagCanIdBase + actuator_config.can_node_id;
 }
@@ -169,6 +189,10 @@ void refreshBootReference() {
 bool selectOutputProfile(OutputEncoderType profile) {
   ConfigStore::CalibrationBundle calibration_bundle = {};
   ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  if (profile == OutputEncoderType::As5600 &&
+      !prepareAs5600Profile(calibration_bundle)) {
+    return false;
+  }
   if (!isOutputProfileSelectable(calibration_bundle, profile)) {
     return false;
   }
