@@ -1980,6 +1980,31 @@ The highest-priority remaining tasks are now:
 2. If manual motion feels too aggressive, step angle `Kp` down to `2.35` before changing velocity PI.
 3. If future loaded-mechanism tests show steady angle error, add an explicit angle I term with anti-windup rather than increasing velocity I further.
 
+Latest operational step completed:
+
+- restored the local CAN interface after the user reported CAN went down
+- observed initial interface state:
+  - `can0` was `state DOWN`
+  - CAN state was `STOPPED`
+  - the CAN UI server process was still running on `127.0.0.1:8765`
+- brought `can0` back up at `1 Mbps`
+  - attempted `restart-ms 100`, but the current `gs_usb` adapter reported that bus-off restart is not supported
+  - interface still came up successfully as `UP`, `LOWER_UP`, `ERROR-ACTIVE`
+- verified raw CAN traffic with `candump can0`
+  - observed live `0x407`, `0x417`, `0x5F7`, `0x427`, and `0x437` frames
+- verified UI backend recovery through `/api/state`
+  - `link_alive = true`
+  - active profile = `As5600`
+  - `armed = false`
+  - stream off
+  - no backend error
+
+The highest-priority remaining tasks are now:
+
+1. Continue manual web-UI motion testing with the final tuned firmware while confirming the UI remains `LINK ALIVE`.
+2. If CAN goes down again, first check `ip -details -statistics link show can0`, then bring it up at `1 Mbps` without relying on unsupported `restart-ms`.
+3. If repeated CAN drops occur during motion, inspect adapter/cabling/power and capture CAN error counters before further control tuning.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
