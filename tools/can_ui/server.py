@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import math
 import os
 import re
 import signal
@@ -37,6 +38,9 @@ SAFE_IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 CAN_STATUS_PERIOD_S = 0.05
 LINK_ALIVE_WINDOW_S = 1.5
+MAX_STD_CAN_ID = 0x7FF
+MAX_CLASSIC_CAN_DLC = 8
+MAX_COMMAND_ABS_VALUE = 1_000_000.0
 
 
 def clamp_node_id(node_id: int) -> int:
@@ -56,6 +60,10 @@ def frame_id(base: int, node_id: int) -> int:
 
 
 def encode_milli_units(value: float) -> str:
+    if not math.isfinite(value):
+        raise ValueError("value must be finite")
+    if abs(value) > MAX_COMMAND_ABS_VALUE:
+        raise ValueError(f"value magnitude must be <= {MAX_COMMAND_ABS_VALUE:g}")
     raw = int(round(value * 1000.0))
     if raw < -(2**31) or raw > (2**31 - 1):
         raise ValueError("value is out of int32 range after milli scaling")
@@ -68,6 +76,18 @@ def decode_milli_units(payload_hex: str) -> Optional[float]:
     payload = bytes.fromhex(payload_hex[:8])
     raw = int.from_bytes(payload, byteorder="little", signed=True)
     return raw * 0.001
+
+
+def ensure_finite_command_value(value: Any, unit: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{unit} command must be a finite number") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{unit} command must be finite")
+    if abs(parsed) > MAX_COMMAND_ABS_VALUE:
+        raise ValueError(f"{unit} command magnitude must be <= {MAX_COMMAND_ABS_VALUE:g}")
+    return parsed
 
 
 @dataclass
@@ -142,6 +162,14 @@ class CanUiBridge:
         node_id = clamp_node_id(node_id)
         with self._lock:
             self._config = SessionConfig(can_iface=can_iface, node_id=node_id)
+            self._latest_angle_deg = None
+            self._latest_velocity_deg_s = None
+            self._latest_diag = {}
+            self._last_frame_time = None
+            self._last_error = None
+            self._command_mode = None
+            self._command_value = 0.0
+            self._stream_enabled = False
             self._terminate_candump_locked()
         self.log("info", f"Session updated: iface={can_iface}, node_id={node_id}")
 
@@ -295,8 +323,12 @@ class CanUiBridge:
         payload_hex = payload_hex.strip().upper()
         if not re.fullmatch(r"[0-9A-F]{1,3}", can_id_hex):
             raise ValueError("can_id must be 1-3 hex digits")
+        if int(can_id_hex, 16) > MAX_STD_CAN_ID:
+            raise ValueError("can_id must be <= 7FF for standard CAN frames")
         if payload_hex and (len(payload_hex) % 2 != 0 or not re.fullmatch(r"[0-9A-F]+", payload_hex)):
             raise ValueError("payload must be even-length hex bytes")
+        if len(payload_hex) // 2 > MAX_CLASSIC_CAN_DLC:
+            raise ValueError("payload must be 8 bytes or fewer")
         self._send_frame(can_id_hex, payload_hex)
 
     def set_profile(self, profile_name: str) -> None:
@@ -305,6 +337,8 @@ class CanUiBridge:
         self.send_one_shot("profile", profile_name)
 
     def set_power(self, armed: bool) -> None:
+        if not isinstance(armed, bool):
+            raise ValueError("armed must be a boolean")
         self.send_one_shot("power", armed)
         if not armed:
             with self._lock:
@@ -313,16 +347,18 @@ class CanUiBridge:
                 self._stream_enabled = False
 
     def set_angle_target(self, angle_deg: float) -> None:
+        angle_deg = ensure_finite_command_value(angle_deg, "angle")
         with self._lock:
             self._command_mode = "angle"
-            self._command_value = float(angle_deg)
+            self._command_value = angle_deg
             self._stream_enabled = True
         self.log("info", f"Latched angle target = {angle_deg:.3f} deg")
 
     def set_velocity_target(self, velocity_deg_s: float) -> None:
+        velocity_deg_s = ensure_finite_command_value(velocity_deg_s, "velocity")
         with self._lock:
             self._command_mode = "velocity"
-            self._command_value = float(velocity_deg_s)
+            self._command_value = velocity_deg_s
             self._stream_enabled = True
         self.log("info", f"Latched velocity target = {velocity_deg_s:.3f} deg/s")
 
@@ -358,7 +394,13 @@ class CanUiBridge:
                 value = self._command_value
             try:
                 self.send_one_shot(mode, value)
-            except RuntimeError:
+            except (RuntimeError, ValueError) as exc:
+                with self._lock:
+                    self._stream_enabled = False
+                    self._command_mode = None
+                    self._command_value = 0.0
+                self._set_error(str(exc))
+                self.log("error", f"Stopped latched stream: {exc}")
                 pass
 
     def snapshot(self) -> dict[str, Any]:
@@ -427,7 +469,7 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             self.bridge.set_profile(body["profile"])
             return {"ok": True}
         if path == "/api/power":
-            self.bridge.set_power(bool(body["armed"]))
+            self.bridge.set_power(body["armed"])
             return {"ok": True}
         if path == "/api/angle":
             self.bridge.set_angle_target(float(body["deg"]))
@@ -479,6 +521,11 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def build_handler(bridge: CanUiBridge):
     class Handler(UiRequestHandler):
         pass
@@ -498,12 +545,12 @@ def main() -> int:
 
     bridge = CanUiBridge(args.can_iface, args.node_id)
     handler_cls = build_handler(bridge)
-    server = ThreadingHTTPServer((args.host, args.port), handler_cls)
+    server = ReusableThreadingHTTPServer((args.host, args.port), handler_cls)
 
     def shutdown_handler(signum: int, frame: Any) -> None:
         del signum, frame
         bridge.shutdown()
-        server.shutdown()
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)

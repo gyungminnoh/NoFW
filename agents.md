@@ -1451,6 +1451,43 @@ The highest-priority remaining tasks are now:
 2. Continue manual UI motion validation from the current `As5600` state using only small inward angle steps until travel limit visibility is added.
 3. Consider adding CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so the UI and upper controller do not depend on undocumented stored config assumptions.
 
+Latest implementation step completed:
+
+- audited and smoke-tested the CAN web UI for non-motion failure cases
+- issues found and fixed:
+  - session updates could briefly show stale telemetry/diag from the previous session
+  - changing session while a latched stream was active did not clear that stream
+  - invalid numeric commands such as `NaN` or oversized values could break the background TX stream
+  - raw send allowed invalid standard CAN IDs above `0x7FF`
+  - raw send allowed payloads longer than classic CAN's `8` bytes
+  - `/api/power` treated non-empty strings such as `"false"` as `true`
+  - frontend action error text could be overwritten immediately by stale state rendering
+  - failed profile POSTs could leave the UI in a misleading pending state
+  - HTTP server shutdown could deadlock when signal handling called `server.shutdown()` from the serving thread
+- implementation updates:
+  - stricter backend validation for angle/velocity values, power commands, raw CAN ID, and raw payload length
+  - session updates now clear telemetry, diag, errors, and active stream before restarting `candump`
+  - TX loop now stops the stream and records an error if value encoding fails
+  - frontend now rejects non-finite numeric inputs before POST
+  - frontend profile feedback now clears pending state on POST failure
+  - server uses a reusable threaded HTTP server and signal-safe shutdown thread
+  - static cache-busting version advanced to `v4`
+  - added reusable smoke test:
+    - [tools/can_ui/smoke_test.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/smoke_test.py)
+- verification:
+  - `node --check tools/can_ui/static/app.js` passed
+  - `python3 -m py_compile tools/can_ui/server.py tools/can_ui/smoke_test.py` passed
+  - `python3 tools/can_ui/smoke_test.py --can-iface can0 --node-id 7 --port 8765` passed `19/19`
+  - smoke test confirmed final state stayed `armed = false`, stream off
+- documentation updated:
+  - [docs/can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Continue manual UI motion validation from the current `As5600` state using only small inward angle steps until travel limit visibility is added.
+3. Consider adding CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so the UI and upper controller do not depend on undocumented stored config assumptions.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

@@ -69,6 +69,15 @@ function syncPresetState(inputEl, buttons) {
   }
 }
 
+function readFiniteNumberInput(id, label) {
+  const el = document.getElementById(id);
+  const value = Number(el.value);
+  if (!Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number`);
+  }
+  return value;
+}
+
 function updateProfileFeedback(diag, linkAlive) {
   if (!pendingProfileRequest) {
     stateEls.profileFeedback.textContent = profileFeedback.text;
@@ -126,10 +135,10 @@ async function runAction(fn) {
   try {
     await fn();
   } catch (err) {
-    stateEls.lastError.textContent = err.message;
     if (lastState) {
       renderState(lastState);
     }
+    stateEls.lastError.textContent = err.message;
   }
 }
 
@@ -284,8 +293,8 @@ document.getElementById("applySessionBtn").addEventListener("click", async () =>
 );
 
 for (const btn of document.querySelectorAll(".profile-btn")) {
-  btn.addEventListener("click", async () =>
-    runAction(async () => {
+  btn.addEventListener("click", async () => {
+    await runAction(async () => {
       pendingProfileRequest = {
         profile: btn.dataset.profile,
         requestedAt: performance.now(),
@@ -297,9 +306,21 @@ for (const btn of document.querySelectorAll(".profile-btn")) {
       if (lastState) {
         renderState(lastState);
       }
-      await postJson("/api/profile", { profile: btn.dataset.profile });
-    })
-  );
+      try {
+        await postJson("/api/profile", { profile: btn.dataset.profile });
+      } catch (err) {
+        pendingProfileRequest = null;
+        profileFeedback = {
+          text: `Profile request failed: ${err.message}`,
+          kind: "bad",
+        };
+        if (lastState) {
+          renderState(lastState);
+        }
+        throw err;
+      }
+    });
+  });
 }
 
 document.getElementById("armBtn").addEventListener("click", async () =>
@@ -317,7 +338,7 @@ document.getElementById("disarmBtn").addEventListener("click", async () =>
 document.getElementById("sendAngleBtn").addEventListener("click", async () =>
   runAction(async () => {
     await postJson("/api/angle", {
-      deg: Number(document.getElementById("angleInput").value),
+      deg: readFiniteNumberInput("angleInput", "Angle target"),
     });
   })
 );
@@ -331,7 +352,7 @@ document.getElementById("holdCurrentBtn").addEventListener("click", async () =>
 document.getElementById("sendVelocityBtn").addEventListener("click", async () =>
   runAction(async () => {
     await postJson("/api/velocity", {
-      deg_s: Number(document.getElementById("velocityInput").value),
+      deg_s: readFiniteNumberInput("velocityInput", "Velocity target"),
     });
   })
 );

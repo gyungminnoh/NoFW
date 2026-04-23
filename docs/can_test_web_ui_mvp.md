@@ -145,8 +145,36 @@
 python3 tools/can_ui/server.py --can-iface can0 --node-id 7 --port 8765
 ```
 
+터미널 세션과 분리해서 계속 띄워야 하면 `nohup`을 사용한다.
+
+```bash
+nohup python3 tools/can_ui/server.py --can-iface can0 --node-id 7 --port 8765 > /tmp/nofw_can_ui.log 2>&1 &
+```
+
 브라우저 접속:
 
 ```text
 http://127.0.0.1:8765
 ```
+
+## Smoke Test
+
+UI 백엔드와 정적 파일, 안전한 입력 검증 경로는 다음으로 확인한다.
+
+```bash
+python3 tools/can_ui/smoke_test.py --can-iface can0 --node-id 7 --port 8765
+```
+
+이미 실행 중인 서버를 대상으로만 확인하려면:
+
+```bash
+python3 tools/can_ui/smoke_test.py --use-running-server --port 8765
+```
+
+이 smoke test는 다음을 확인한다.
+
+- live `0x5F7` diag 수신
+- `disarm`, `stop_stream` 안전 endpoint
+- 정적 파일 cache-busting 버전
+- 잘못된 arm 타입, raw frame, 숫자 입력, session 입력 거부
+- 검증 후에도 `armed = false`, stream off 유지
