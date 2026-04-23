@@ -1431,6 +1431,26 @@ The highest-priority remaining tasks are now:
 2. Continue manual UI motion validation from the current `As5600` state, starting with only small inward angle steps while the output coordinate remains outside configured travel limits.
 3. Add UI-visible travel limit configuration/status before larger manual angle tests, because current output angle can be outside the stored `0 .. max` range.
 
+Latest implementation step completed:
+
+- committed and pushed the AS5600 runtime-zero and out-of-range hold-current safety fix
+- pushed commit:
+  - `2f67409 Fix AS5600 zero reference and out-of-range hold`
+- remote updated:
+  - `origin/main`
+- final verified hardware state before push:
+  - `As5600` active
+  - `armed = false`
+  - command stream off
+- build verification:
+  - `pio run -e custom_f446re` passed
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Continue manual UI motion validation from the current `As5600` state using only small inward angle steps until travel limit visibility is added.
+3. Consider adding CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so the UI and upper controller do not depend on undocumented stored config assumptions.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
