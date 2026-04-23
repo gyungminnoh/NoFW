@@ -1765,6 +1765,31 @@ The highest-priority remaining tasks are now:
 2. Use the new config edit panel to set travel range around the actual mechanism working range before further wide-angle tuning.
 3. Continue manual motion testing from the web UI using the now-visible and editable config values.
 
+Latest implementation step completed:
+
+- user clarified the output shaft currently has no attached load/mechanism, so travel limits are not serving a physical safety role in this bench setup
+- changed the persisted actuator travel limits through the web UI/API to a symmetric test range:
+  - `output_min_deg = -1080.000`
+  - `output_max_deg = 1080.000`
+- rationale:
+  - keeps the same total default span of `2160 deg`
+  - avoids the previous `0 deg` lower clamp interfering with negative-direction tests
+  - places the current boot/output angle inside the configured range
+- verified live state after saving:
+  - `angle_deg` about `60.5 deg`
+  - active profile `As5600`
+  - `gear_ratio = 8.000`
+  - `armed = false`
+  - stream off
+- verification passed:
+  - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `30/30`
+
+The highest-priority remaining tasks are now:
+
+1. Continue manual motion testing from the web UI inside the new `-1080 .. 1080 deg` range.
+2. If manual tests show direction or response issues, capture the exact start angle, target angle, and command mode before retuning.
+3. Decide later whether to auto-fallback profile when gear-ratio changes invalidate the currently stored profile, or keep current reject-only behavior.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
