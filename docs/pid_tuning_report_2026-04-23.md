@@ -317,15 +317,78 @@ velocity command도 수동 테스트에서 반응이 늦게 느껴질 수 있어
 
 판정: 저속/중속 velocity command 추종은 현재 벤치 기준에서 충분히 안정적이다.
 
+## Velocity PI 및 angle 재튜닝
+
+이후 사용자가 angle/velocity gain을 더 넓게 조합해 최적점을 찾는 방향에 동의했다.
+현재 구조는 angle outer loop와 velocity inner loop가 직렬로 연결되어 있으므로, 먼저 velocity loop를 조정한 뒤 angle `Kp`를 다시 확인했다.
+
+### Velocity PI 후보
+
+`±120 deg/s`, `4 s` velocity step으로 측정했다.
+
+| velocity P | velocity I | velocity D | avg tail error (`deg/s`) | avg tail std (`deg/s`) | avg `t_90_s` | avg first 5% | 판정 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `0.12` | `0.4` | `0.0` | `1.962` | `2.097` | `1.828` | `2.176` | 기준값 |
+| `0.16` | `0.4` | `0.0` | `2.463` | `2.314` | `1.875` | `2.278` | P 증가 단독은 악화 |
+| `0.12` | `0.6` | `0.0` | `0.548` | `0.897` | `1.661` | `1.904` | 개선 |
+| `0.12` | `0.8` | `0.0` | `0.183` | `0.537` | `1.552` | `1.764` | 개선 |
+| `0.12` | `1.0` | `0.0` | `0.316` | `1.012` | `1.505` | `1.639` | 빠르지만 흔들림 증가 |
+| `0.12` | `1.2` | `0.0` | `0.128` | `0.677` | `1.502` | `1.609` | 좋음 |
+| `0.12` | `1.5` | `0.0` | `0.010` | `0.403` | `1.505` | `1.558` | 좋음 |
+| `0.12` | `2.0` | `0.0` | `0.018` | `0.397` | `1.507` | `1.507` | 최종 선택 |
+| `0.16` | `2.0` | `0.0` | `0.075` | `0.478` | `1.505` | `1.505` | 비슷하지만 음방향이 약간 나쁨 |
+| `0.12` | `2.0` | `0.001` | `0.198` | `3.078` | `1.504` | `1.504` | D는 노이즈/overshoot 증가로 기각 |
+
+결론:
+
+- velocity `P` 증가는 이 벤치 조건에서 이득이 없었다.
+- velocity `I` 증가는 tracking error와 도달 시간을 크게 개선했다.
+- velocity `D`는 아주 작은 값에서도 속도 overshoot와 tail 흔들림을 키워서 유지하지 않았다.
+
+최종 velocity PI:
+
+```cpp
+motor.PID_velocity.P = 0.12;
+motor.PID_velocity.I = 2.0;
+motor.PID_velocity.D = 0.0;
+```
+
+### Velocity PI 변경 후 angle 재튜닝
+
+velocity inner loop를 `P=0.12`, `I=2.0`, `D=0.0`으로 고정한 뒤, angle `Kp`를 다시 측정했다.
+angle slew는 `300 deg/s^2`를 유지했다.
+
+| angle Kp | avg overshoot (`deg`) | avg `t_90_s` | avg first `±1 deg` | avg settle `±1 deg` | 판정 |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| `1.7` | `0.021` | `2.326` | `3.960` | `3.960` | 안정적이지만 최종 접근이 느림 |
+| `2.0` | `0.022` | `2.089` | `3.480` | `3.480` | 개선 |
+| `2.2` | `0.031` | `1.880` | `3.167` | `3.167` | 개선 |
+| `2.35` | `0.026` | `1.827` | `2.630` | `2.630` | 매우 안정적 |
+| `2.45` | `0.956` | `1.821` | `2.035` | `2.196` | 최종 선택 |
+| `2.5` | `3.315` | `1.817` | `2.435` | `2.836` | overshoot 과다로 기각 |
+
+최종 선택 조합 `angle Kp = 2.45`, velocity `P/I/D = 0.12/2.0/0.0`의 `±180 deg` 결과:
+
+- `+180 deg`: overshoot `1.011 deg`, `t_90 = 1.821 s`, first `±1 deg = 2.034 s`, settle `±1 deg = 2.357 s`
+- `-180 deg`: overshoot `0.901 deg`, `t_90 = 1.820 s`, first `±1 deg = 2.035 s`, settle `±1 deg = 2.035 s`
+
+작은 `±30 deg` step도 확인했다.
+
+- `+30 deg`: overshoot `0.023 deg`, `t_90 = 1.589 s`, first/settle `±1 deg = 2.072 s`
+- `-30 deg`: overshoot `0.017 deg`, `t_90 = 1.603 s`, first/settle `±1 deg = 2.077 s`
+
+현재 angle controller는 `P` 구조이며 angle `I/D` 항은 구현하지 않았다.
+velocity inner loop 개선 후 angle `P`만으로 overshoot와 tail error가 충분히 작아졌기 때문에, 이번 단계에서는 angle `I/D`를 추가하지 않는 편이 더 안전하다고 판단했다.
+
 ## 적용한 최종 계수
 
 ```cpp
 motor.PID_velocity.P = 0.12;
-motor.PID_velocity.I = 0.4;
+motor.PID_velocity.I = 2.0;
 motor.PID_velocity.D = 0.0;
 motor.LPF_velocity.Tf = 0.007;
 
-pvc.Kp = 1.7f;
+pvc.Kp = 2.45f;
 ```
 
 추가 반응속도 튜닝 후 최종 motion shaping:
@@ -334,14 +397,14 @@ pvc.Kp = 1.7f;
 ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f;
 ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0f;
 
-pvc.Kp = 1.7f;
+pvc.Kp = 2.45f;
 ```
 
 ## 결론
 
-현재 문제의 주된 원인은 velocity PI보다 outer angle P gain이었다.
+초기에는 주된 병목이 outer angle P gain이었지만, velocity inner loop의 `I` 항을 높인 뒤 angle `Kp`를 더 공격적으로 올릴 수 있었다.
 
 `pvc.Kp`를 `20.0 -> 2.0 -> 1.5 -> 1.0`으로 낮추면 overshoot는 매우 작아졌지만, 수동 테스트 반응은 느렸다.
-이후 실제 업로드 기반 조합 비교에서는 `pvc.Kp = 1.7`, angle-mode slew `300 deg/s^2`, velocity-mode slew `180 deg/s^2`가 더 적절한 균형이었다.
+이후 실제 업로드 기반 조합 비교에서는 `velocity P/I/D = 0.12/2.0/0.0`, `pvc.Kp = 2.45`, angle-mode slew `300 deg/s^2`, velocity-mode slew `180 deg/s^2`가 더 적절한 균형이었다.
 
 추가 고속/대각도 튜닝 전에는 UI에서 현재 travel limit과 gear ratio를 확인하고, 명령 target이 범위 안에 있는지 먼저 확인해야 한다.

@@ -698,7 +698,7 @@ static void initSystem() {
   motor.voltage_limit        = (TORQUE_LIMIT_VOLTS < VOLTAGE_LIMIT) ? TORQUE_LIMIT_VOLTS : VOLTAGE_LIMIT;
 
   motor.PID_velocity.P = 0.12;
-  motor.PID_velocity.I = 0.4;
+  motor.PID_velocity.I = 2.0;
   motor.PID_velocity.D = 0.0;
   motor.LPF_velocity.Tf = 0.007;
   motor.velocity_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
@@ -739,7 +739,7 @@ static void initSystem() {
   disarmPowerStage();
 
   // Outer loop gains (tune)
-  pvc.Kp = 1.7f;
+  pvc.Kp = 2.45f;
   pvc.vel_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
   pvc.accel_limit = ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2;
   pvc.reset();

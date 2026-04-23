@@ -135,13 +135,42 @@ def summarize_velocity_step(samples: list[Sample], command: float) -> dict[str, 
     angles = [s.angle_deg for s in samples]
     half = max(1, len(velocities) // 2)
     tail = velocities[half:]
+    direction = 1.0 if command >= 0.0 else -1.0
+    command_mag = abs(command)
+    t_90_s = 0.0
+    first_within_5pct_s = 0.0
+    settle_within_5pct_s = 0.0
+    overshoot = 0.0
+
+    if command_mag > 0.0:
+        threshold_90 = command * 0.9
+        tolerance = max(1.0, command_mag * 0.05)
+        for sample in samples:
+            if sample.velocity_deg_s * direction >= threshold_90 * direction:
+                t_90_s = sample.t_s
+                break
+        for sample in samples:
+            if abs(sample.velocity_deg_s - command) <= tolerance:
+                first_within_5pct_s = sample.t_s
+                break
+        for idx, sample in enumerate(samples):
+            if all(abs(s.velocity_deg_s - command) <= tolerance for s in samples[idx:]):
+                settle_within_5pct_s = sample.t_s
+                break
+        overshoot = max(0.0, max((v - command) * direction for v in velocities))
+
     return {
         "command_deg_s": command,
         "tail_avg_deg_s": mean(tail),
         "tail_error_deg_s": mean(tail) - command,
+        "tail_std_deg_s": statistics.pstdev(tail) if len(tail) > 1 else 0.0,
         "min_velocity_deg_s": min(velocities),
         "max_velocity_deg_s": max(velocities),
+        "overshoot_deg_s": overshoot,
         "max_abs_velocity_deg_s": max(abs(v) for v in velocities),
+        "t_90_s": t_90_s,
+        "first_within_5pct_s": first_within_5pct_s,
+        "settle_within_5pct_s": settle_within_5pct_s,
         "angle_delta_deg": angles[-1] - angles[0],
     }
 

@@ -1929,6 +1929,57 @@ The highest-priority remaining tasks are now:
 2. If still too slow, only then consider `Kp = 1.8`, angle slew `240` while explicitly accepting about `2 deg` overshoot.
 3. If overshoot is visually objectionable, keep `Kp = 1.7` and implement a better trajectory/deceleration profile instead of raising P gain further.
 
+Latest implementation step completed:
+
+- expanded tuning from angle `Kp`/slew only to the inner velocity loop as well
+- measurement script improved:
+  - [tools/control_tuning/can_step_response.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/control_tuning/can_step_response.py)
+  - velocity summaries now include tail standard deviation, velocity overshoot, `t_90_s`, first/settled within 5%
+- velocity loop upload-and-measure sweep:
+  - baseline `P/I/D = 0.12/0.4/0.0` at `±120 deg/s`:
+    - avg tail error about `1.962 deg/s`
+    - avg tail std about `2.097 deg/s`
+    - avg `t_90` about `1.828 s`
+  - `P = 0.16`, `I = 0.4` was worse than baseline
+  - increasing `I` while keeping `P = 0.12` steadily improved tracking
+  - selected velocity gains:
+    - `motor.PID_velocity.P = 0.12`
+    - `motor.PID_velocity.I = 2.0`
+    - `motor.PID_velocity.D = 0.0`
+  - selected velocity result at `±120 deg/s`:
+    - avg tail error about `0.018 deg/s`
+    - avg tail std about `0.397 deg/s`
+    - avg `t_90` about `1.507 s`
+  - `velocity D = 0.001` was tested and rejected because it increased velocity overshoot and tail noise
+- after improving the velocity inner loop, angle `Kp` was retuned with angle slew still at `300 deg/s^2`
+- angle `Kp` results after velocity PI update:
+  - `Kp = 1.7`: very low overshoot but first `±1 deg` around `3.96 s`
+  - `Kp = 2.0`: improved first `±1 deg` to about `3.48 s`
+  - `Kp = 2.2`: improved first `±1 deg` to about `3.17 s`
+  - `Kp = 2.35`: improved first `±1 deg` to about `2.63 s` with near-zero overshoot
+  - `Kp = 2.45`: selected final balance, first `±1 deg` about `2.03 s`, overshoot about `0.9 .. 1.0 deg`
+  - `Kp = 2.5`: rejected because overshoot rose to about `3.3 deg`
+- small-step validation for final gains:
+  - `+30 deg`: overshoot about `0.023 deg`, first/settle `±1 deg` about `2.072 s`
+  - `-30 deg`: overshoot about `0.017 deg`, first/settle `±1 deg` about `2.077 s`
+- final selected firmware values:
+  - `motor.PID_velocity.P = 0.12`
+  - `motor.PID_velocity.I = 2.0`
+  - `motor.PID_velocity.D = 0.0`
+  - `pvc.Kp = 2.45`
+  - `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0`
+  - `ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0`
+- angle `I/D` terms were not added because the current angle controller is P-only and the retuned velocity loop plus angle `Kp` already achieved low overshoot and near-zero tail error
+- final selected firmware is already uploaded to the board
+- updated tuning report:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Run user-visible manual web-UI tests with the final `velocity P/I/D = 0.12/2.0/0.0`, `angle Kp = 2.45`, angle slew `300` firmware.
+2. If manual motion feels too aggressive, step angle `Kp` down to `2.35` before changing velocity PI.
+3. If future loaded-mechanism tests show steady angle error, add an explicit angle I term with anti-windup rather than increasing velocity I further.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
