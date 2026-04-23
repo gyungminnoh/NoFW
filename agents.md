@@ -1895,6 +1895,40 @@ The highest-priority remaining tasks are now:
 2. If the UI reports `As5600ReadFailed` later, inspect AS5600 wiring/magnet/I2C state before retuning motion behavior.
 3. If response is still too slow, retest the previously measured `Kp = 1.8`, angle slew `240` candidate and decide whether about `2 deg` overshoot is acceptable.
 
+Latest implementation step completed:
+
+- performed an upload-and-measure sweep to separate whether slow angle response was limited mainly by `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2` or `pvc.Kp`
+- safety setup:
+  - found the UI/backend initially had `armed = true` and an active angle stream
+  - sent repeated disarm and stop-stream commands before tuning
+  - all tuning runs ended with `armed = false` and stream off
+- each candidate was built/uploaded to the board and measured with `+180 deg` and `-180 deg` steps using [tools/control_tuning/can_step_response.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/control_tuning/can_step_response.py)
+- measured comparison:
+  - `Kp = 1.5`, angle slew `180`: avg overshoot `1.045 deg`, avg `t_90 = 2.613 s`, avg first `±1 deg = 3.414 s`
+  - `Kp = 1.5`, angle slew `240`: avg overshoot `1.032 deg`, avg `t_90 = 2.510 s`, avg first `±1 deg = 3.312 s`
+  - `Kp = 1.6`, angle slew `240`: avg overshoot `1.206 deg`, avg `t_90 = 2.398 s`, avg first `±1 deg = 3.174 s`
+  - `Kp = 1.7`, angle slew `240`: avg overshoot `1.677 deg`, avg `t_90 = 2.344 s`, avg first `±1 deg = 2.984 s`
+  - `Kp = 1.7`, angle slew `300`: avg overshoot `1.698 deg`, avg `t_90 = 2.291 s`, avg first `±1 deg = 2.930 s`
+  - `Kp = 1.8`, angle slew `240`: avg overshoot `2.014 deg`, avg `t_90 = 2.295 s`, avg first `±1 deg = 2.854 s`
+  - `Kp = 1.8`, angle slew `180`: avg overshoot `5.277 deg`, rejected
+- conclusion:
+  - increasing angle slew alone only modestly improved response
+  - the stronger response improvement came from increasing `pvc.Kp`
+  - `Kp = 1.8` was faster but overshoot crossed about `2 deg`
+  - the selected balance is now:
+    - `pvc.Kp = 1.7f`
+    - `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0f`
+    - `ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f`
+- final selected firmware is already uploaded to the board
+- updated tuning report:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Run user-visible manual web-UI tests with the new `Kp = 1.7`, angle slew `300` firmware and confirm whether the response now feels fast enough.
+2. If still too slow, only then consider `Kp = 1.8`, angle slew `240` while explicitly accepting about `2 deg` overshoot.
+3. If overshoot is visually objectionable, keep `Kp = 1.7` and implement a better trajectory/deceleration profile instead of raising P gain further.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

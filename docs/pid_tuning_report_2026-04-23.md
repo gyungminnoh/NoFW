@@ -251,22 +251,55 @@ inner velocity PI는 일단 변경하지 않았다.
 
 판정: 기존 `Kp = 1.0` 대비 90% 도달 시간이 약 `27%` 줄었고, 최고속도도 약 `50%` 증가했다. 한 방향에서 overshoot가 `1 deg`를 약간 넘지만 최종 오차는 거의 없다.
 
-### 기각한 더 공격적인 후보
+### `Kp` / angle slew 분리 재튜닝
 
-`pvc.Kp = 2.0`, angle slew `360 deg/s^2`:
+사용자가 여전히 반응이 느리다고 보고해 `pvc.Kp`와 angle-mode slew를 분리해서 다시 측정했다.
+테스트는 각 조합을 실제 업로드한 뒤 `+180 deg`, `-180 deg` step으로 수행했다.
 
-- `+180 deg` step overshoot: `2.565 deg`
-- `t_90_s`: `2.077 s`
-- `first_within_1deg_s`: `2.609 s`
-- `settle_within_1deg_s`: `4.583 s`
+| `pvc.Kp` | angle slew (`deg/s^2`) | avg overshoot (`deg`) | avg `t_90_s` | avg first `±1 deg` | avg settle `±1 deg` | 판정 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `1.5` | `180` | `1.045` | `2.613` | `3.414` | `4.695` | 기존 기준값 |
+| `1.5` | `240` | `1.032` | `2.510` | `3.312` | `4.673` | slew 단독 증가는 개선폭이 작음 |
+| `1.6` | `240` | `1.206` | `2.398` | `3.174` | `6.054` | 안정적이지만 체감 개선이 제한적 |
+| `1.7` | `240` | `1.677` | `2.344` | `2.984` | `5.626` | 좋은 균형 |
+| `1.7` | `300` | `1.698` | `2.291` | `2.930` | `5.547` | 최종 선택 |
+| `1.8` | `240` | `2.014` | `2.295` | `2.854` | `5.280` | 빠르지만 overshoot가 약 `2 deg` |
+| `1.8` | `180` | `5.277` | `2.288` | `2.607` | `4.870` | overshoot 과다로 기각 |
 
-`pvc.Kp = 1.8`, angle slew `240 deg/s^2`:
+해석:
 
-- `-180 deg` step overshoot: `1.738 deg`
-- `+180 deg` step overshoot: `2.189 deg`
-- `t_90_s`: about `2.3 s`
+- `Kp = 1.5`에서 angle slew만 `180 -> 240`으로 올리면 `t_90`은 약 `0.10 s`만 줄었다.
+- 반응 개선의 주된 요인은 slew보다 `pvc.Kp` 증가였다.
+- 다만 `Kp = 1.8`은 overshoot가 `2 deg` 이상으로 올라가거나, slew 조합에 따라 `5 deg` 이상으로 악화됐다.
+- 현재 벤치 기준 최종 균형점은 `Kp = 1.7`, angle slew `300 deg/s^2`다.
 
-판정: 빠르지만 overshoot 증가가 커서 현재 기본값으로는 부적절하다.
+최종 선택 조합의 세부 측정:
+
+`+180 deg` step:
+
+- overshoot: `1.690 deg`
+- tail error: `0.003 deg`
+- max absolute velocity: `162.818 deg/s`
+- `t_90_s`: `2.288 s`
+- `first_within_1deg_s`: `2.928 s`
+- `settle_within_1deg_s`: `5.655 s`
+
+`-180 deg` step:
+
+- overshoot: `1.706 deg`
+- tail error: `0.028 deg`
+- max absolute velocity: `168.420 deg/s`
+- `t_90_s`: `2.293 s`
+- `first_within_1deg_s`: `2.931 s`
+- `settle_within_1deg_s`: `5.438 s`
+
+기존 `Kp = 1.5`, angle slew `180 deg/s^2` 대비:
+
+- 평균 `t_90_s`: `2.613 s -> 2.291 s`
+- 평균 first `±1 deg`: `3.414 s -> 2.930 s`
+- 평균 overshoot: `1.045 deg -> 1.698 deg`
+
+판정: overshoot 증가를 약 `0.65 deg` 추가로 허용하는 대신, 눈으로 보이는 초기 반응과 `±1 deg` 최초 도달 시간이 유의미하게 빨라졌다.
 
 ## Velocity Mode slew 조정
 
@@ -292,16 +325,16 @@ motor.PID_velocity.I = 0.4;
 motor.PID_velocity.D = 0.0;
 motor.LPF_velocity.Tf = 0.007;
 
-pvc.Kp = 1.5f;
+pvc.Kp = 1.7f;
 ```
 
 추가 반응속도 튜닝 후 최종 motion shaping:
 
 ```cpp
 ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f;
-ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 180.0f;
+ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0f;
 
-pvc.Kp = 1.5f;
+pvc.Kp = 1.7f;
 ```
 
 ## 결론
@@ -309,6 +342,6 @@ pvc.Kp = 1.5f;
 현재 문제의 주된 원인은 velocity PI보다 outer angle P gain이었다.
 
 `pvc.Kp`를 `20.0 -> 2.0 -> 1.5 -> 1.0`으로 낮추면 overshoot는 매우 작아졌지만, 수동 테스트 반응은 느렸다.
-현재 벤치에서는 `pvc.Kp = 1.5`, angle-mode slew `180 deg/s^2`, velocity-mode slew `180 deg/s^2`가 더 적절한 균형이다.
+이후 실제 업로드 기반 조합 비교에서는 `pvc.Kp = 1.7`, angle-mode slew `300 deg/s^2`, velocity-mode slew `180 deg/s^2`가 더 적절한 균형이었다.
 
 추가 고속/대각도 튜닝 전에는 UI에서 현재 travel limit과 gear ratio를 확인하고, 명령 target이 범위 안에 있는지 먼저 확인해야 한다.

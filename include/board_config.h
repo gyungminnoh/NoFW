@@ -99,4 +99,4 @@ static constexpr float ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2 = 60.0f;
 // shaping and edge-braking caps. This specifically limits abrupt command
 // reversals or deceleration spikes that can otherwise create strong
 // regenerative braking near the travel edges.
-static constexpr float ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 180.0f;
+static constexpr float ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0f;
