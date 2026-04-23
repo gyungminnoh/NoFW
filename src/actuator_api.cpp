@@ -85,11 +85,11 @@ void setBootReferenceFromMotor(float motor_mt_now_rad) {
 }
 
 float getTargetOutputAbsRad() {
-  return getTargetOutputDeg() * kRadPerDeg;
+  return target_output_deg * kRadPerDeg;
 }
 
 float getTargetOutputDeg() {
-  return clampOutputDeg_(target_output_deg);
+  return target_output_deg;
 }
 
 float motorMTToOutputAbsRad(float motor_mt_rad) {

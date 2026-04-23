@@ -1396,6 +1396,41 @@ The highest-priority remaining tasks are now:
 2. If the user intends to command motion next, confirm the driver should be armed and start with conservative small angle/velocity commands.
 3. Keep firmware behavior, UI behavior, documentation, and this work log synchronized as future changes are made.
 
+Latest implementation step completed:
+
+- ran the first browser/UI-backend motion test in `As5600` profile
+- initial `+1 deg` test exposed two safety-relevant firmware issues:
+  - `As5600` profile first-entry saved zero to FRAM but did not immediately update RAM `ActuatorAPI::output_zero_ref_rad`
+  - when current output angle was already outside stored travel limits, `Hold Current` was clamped to `output_min_deg` instead of holding current position
+- immediate safety action taken:
+  - disarmed the driver
+  - stopped the latched command stream
+  - verified final state was `armed = false`, stream off
+- firmware fixes applied:
+  - added profile zero-reference application during runtime profile switching
+  - changed angle-limit policy so:
+    - in-range targets are clamped to `output_min_deg .. output_max_deg`
+    - if current position is already outside range, commands further outside are held at current position
+    - hold-current and inward recovery commands are allowed
+- uploaded the fixed firmware with:
+  - `pio run -e custom_f446re -t upload`
+- validation after the fix:
+  - `arm + hold current` at about `-87 deg` no longer caused a large automatic move
+  - angle window during hold: about `-87.020 .. -86.995 deg`
+  - small inward command `+0.5 deg` moved from about `-87.020 deg` to `-86.506 deg`
+  - final state was confirmed as `armed = false`, stream off
+- documented the validation and updated behavior:
+  - [docs/as5600_profile_entry_validation_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/as5600_profile_entry_validation_2026-04-23.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+
+The highest-priority remaining tasks are now:
+
+1. Commit and push the AS5600 runtime-zero and out-of-range hold-current safety fix.
+2. Continue manual UI motion validation from the current `As5600` state, starting with only small inward angle steps while the output coordinate remains outside configured travel limits.
+3. Add UI-visible travel limit configuration/status before larger manual angle tests, because current output angle can be outside the stored `0 .. max` range.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

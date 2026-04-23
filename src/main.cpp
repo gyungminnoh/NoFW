@@ -131,6 +131,27 @@ bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle) {
   return true;
 }
 
+void applyOutputZeroReferenceForProfile(const ConfigStore::CalibrationBundle& bundle,
+                                        OutputEncoderType profile) {
+  switch (profile) {
+    case OutputEncoderType::VelocityOnly:
+      ActuatorAPI::output_zero_ref_rad = 0.0f;
+      break;
+    case OutputEncoderType::DirectInput:
+      ActuatorAPI::output_zero_ref_rad =
+          bundle.direct_input.valid ? bundle.direct_input.zero_offset_rad : 0.0f;
+      break;
+    case OutputEncoderType::As5600:
+      ActuatorAPI::output_zero_ref_rad =
+          bundle.as5600.valid ? bundle.as5600.zero_offset_rad : 0.0f;
+      break;
+    case OutputEncoderType::TmagLut:
+      ActuatorAPI::output_zero_ref_rad =
+          bundle.tmag.valid ? bundle.tmag.zero_offset_rad : 0.0f;
+      break;
+  }
+}
+
 uint16_t runtimeDiagCanId() {
   return kRuntimeDiagCanIdBase + actuator_config.can_node_id;
 }
@@ -204,6 +225,7 @@ bool selectOutputProfile(OutputEncoderType profile) {
 
   CanService::init(actuator_config);
   ActuatorAPI::configure(actuator_config);
+  applyOutputZeroReferenceForProfile(calibration_bundle, profile);
   output_encoder_manager.configure(
       actuator_config,
       calibration_bundle.direct_input.valid ? &calibration_bundle.direct_input : nullptr,
@@ -774,14 +796,28 @@ void loop() {
   float target_output_abs = ActuatorAPI::getTargetOutputAbsRad();
   float current_output_raw = ActuatorAPI::motorMTToOutputRawRad(pos_mt);
 
-  // Hard limit: never command further outside the allowed range.
+  // Hard limit: clamp normal in-range commands, but if the actuator is already
+  // outside the configured range, allow hold-current and inward recovery commands.
   const float output_max_rad = actuator_config.output_max_deg * (PI / 180.0f);
   const float output_min_rad = actuator_config.output_min_deg * (PI / 180.0f);
-  if (current_output_raw > output_max_rad && target_output_abs > current_output_raw) {
-    target_output_abs = current_output_raw;
-  } else if (current_output_raw < output_min_rad &&
-             target_output_abs < current_output_raw) {
-    target_output_abs = current_output_raw;
+  if (current_output_raw < output_min_rad) {
+    if (target_output_abs < current_output_raw) {
+      target_output_abs = current_output_raw;
+    } else if (target_output_abs > output_max_rad) {
+      target_output_abs = output_max_rad;
+    }
+  } else if (current_output_raw > output_max_rad) {
+    if (target_output_abs > current_output_raw) {
+      target_output_abs = current_output_raw;
+    } else if (target_output_abs < output_min_rad) {
+      target_output_abs = output_min_rad;
+    }
+  } else {
+    if (target_output_abs > output_max_rad) {
+      target_output_abs = output_max_rad;
+    } else if (target_output_abs < output_min_rad) {
+      target_output_abs = output_min_rad;
+    }
   }
 
   float motor_target_mt =

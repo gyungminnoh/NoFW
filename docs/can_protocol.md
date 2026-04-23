@@ -81,6 +81,12 @@ velocity_deg_s = raw * 0.001
 
 단, 현재 profile이 각도제어를 허용하지 않으면 무시된다.
 
+angle target 제한 정책:
+
+- 현재 출력각이 `output_min_deg .. output_max_deg` 안에 있으면 target은 그 범위로 clamp된다
+- 현재 출력각이 이미 범위 밖이면 더 바깥쪽으로 가는 target은 현재 위치 hold로 제한된다
+- 현재 출력각이 이미 범위 밖이더라도 범위 안쪽으로 돌아오는 target은 허용된다
+
 ## Output Angle Status
 
 - ID: `0x400 + node_id`

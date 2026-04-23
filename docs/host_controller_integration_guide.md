@@ -69,6 +69,11 @@
 - `output_max_deg`
 
 바깥으로 큰 angle command를 보내도 내부 target은 clamp된다.
+단, 현재 출력각 자체가 이미 저장 범위 밖이면 정책이 조금 다르다.
+
+- 더 바깥쪽으로 가는 명령은 현재 위치 hold로 제한된다
+- 현재 위치 hold 명령은 자동으로 travel edge로 끌려가지 않는다
+- 범위 안쪽으로 돌아오는 명령은 허용된다
 
 즉 상위 제어기는:
 
@@ -382,6 +387,7 @@ power-stage command:
 원인 후보:
 
 - stored travel limit clamp
+- 현재 출력각이 이미 stored travel limit 밖에 있어서, 더 바깥쪽 명령이 현재 위치 hold로 제한됨
 
 ## 13. 상위 제어기 구현 권장사항
 
