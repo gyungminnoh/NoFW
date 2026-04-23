@@ -1790,6 +1790,52 @@ The highest-priority remaining tasks are now:
 2. If manual tests show direction or response issues, capture the exact start angle, target angle, and command mode before retuning.
 3. Decide later whether to auto-fallback profile when gear-ratio changes invalidate the currently stored profile, or keep current reject-only behavior.
 
+Latest implementation step completed:
+
+- retuned motion response after the user reported the actuator felt too slow during manual testing
+- added time-domain metrics to [tools/control_tuning/can_step_response.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/control_tuning/can_step_response.py):
+  - `t_90_s`
+  - `first_within_1deg_s`
+  - `settle_within_1deg_s`
+- baseline before speed retune:
+  - `pvc.Kp = 1.0`
+  - `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 60`
+  - `-180 deg` step: `t_90_s = 3.570`, first `±1 deg = 4.582`, overshoot `0.579 deg`
+- tried more aggressive candidates:
+  - `Kp = 2.0`, angle slew `360`: faster, but `+180 deg` overshoot about `2.565 deg`
+  - `Kp = 1.8`, angle slew `240`: faster, but overshoot about `1.7 .. 2.2 deg`
+  - `Kp = 1.6`, angle slew `240`: overshoot about `1.189 deg`, still not clearly better
+- final applied balance:
+  - `pvc.Kp = 1.5f`
+  - `ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 180.0f`
+  - `ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f`
+- final measured angle response:
+  - `-180 deg`: overshoot `0.638 deg`, `t_90_s = 2.616`, first/settled `±1 deg = 3.416`
+  - `+180 deg`: overshoot `1.332 deg`, `t_90_s = 2.608`, first `±1 deg = 3.407`, final tail error about `-0.004 deg`
+- final measured velocity response:
+  - `+60 deg/s` for `4 s`
+  - tail average `59.277 deg/s`
+  - max velocity `60.700 deg/s`
+- verification passed:
+  - `pio run -e custom_f446re`
+  - `pio run -e custom_f446re -t upload`
+  - `python3 -m py_compile tools/control_tuning/can_step_response.py`
+  - `python3 tools/can_ui/smoke_test.py --use-running-server` passed `30/30`
+- final checked board/UI state:
+  - active profile `As5600`
+  - travel limits `-1080 .. 1080 deg`
+  - `gear_ratio = 8.000`
+  - `armed = false`
+  - stream off
+- updated tuning report:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Continue manual motion testing in the web UI with the faster `Kp = 1.5`, angle slew `180`, velocity slew `180` firmware.
+2. If response is still too slow, consider accepting about `2 deg` overshoot and move to the more aggressive `Kp = 1.8`, angle slew `240` candidate.
+3. If overshoot is visually objectionable, keep `Kp = 1.5` and tune a real braking/trajectory profile rather than raising Kp further.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

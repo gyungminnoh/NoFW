@@ -88,7 +88,7 @@ static constexpr float ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2 = 2000.0f;
 // Conservative output-side slew limit for CAN velocity commands. This is kept
 // separate from the outer position-loop accel limit so that a large velocity
 // step does not immediately become a large motor-side demand.
-static constexpr float ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 90.0f;
+static constexpr float ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f;
 
 // Angle-mode edge braking uses a separate, much softer output-side deceleration
 // target than the general outer-loop accel limit. This is intended to reduce
@@ -99,4 +99,4 @@ static constexpr float ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2 = 60.0f;
 // shaping and edge-braking caps. This specifically limits abrupt command
 // reversals or deceleration spikes that can otherwise create strong
 // regenerative braking near the travel edges.
-static constexpr float ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 60.0f;
+static constexpr float ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 180.0f;

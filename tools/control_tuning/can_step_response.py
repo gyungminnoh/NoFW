@@ -92,6 +92,28 @@ def summarize_angle_step(samples: list[Sample], initial: float, target: float) -
     final_tail = angles[-max(1, min(5, len(angles))):]
     directed_positions = [(a - target) * direction for a in angles]
     overshoot = max(0.0, max(directed_positions))
+    step_mag = abs(target - initial)
+    t_90_s = 0.0
+    first_within_1deg_s = 0.0
+    settle_within_1deg_s = 0.0
+
+    if step_mag > 0.0:
+        threshold_90 = initial + direction * step_mag * 0.9
+        for sample in samples:
+            if (sample.angle_deg - threshold_90) * direction >= 0.0:
+                t_90_s = sample.t_s
+                break
+
+    for sample in samples:
+        if abs(sample.angle_deg - target) <= 1.0:
+            first_within_1deg_s = sample.t_s
+            break
+
+    for idx, sample in enumerate(samples):
+        if all(abs(s.angle_deg - target) <= 1.0 for s in samples[idx:]):
+            settle_within_1deg_s = sample.t_s
+            break
+
     return {
         "initial_deg": initial,
         "target_deg": target,
@@ -102,6 +124,9 @@ def summarize_angle_step(samples: list[Sample], initial: float, target: float) -
         "max_deg": max(angles),
         "overshoot_deg": overshoot,
         "max_abs_velocity_deg_s": max(abs(v) for v in velocities),
+        "t_90_s": t_90_s,
+        "first_within_1deg_s": first_within_1deg_s,
+        "settle_within_1deg_s": settle_within_1deg_s,
     }
 
 

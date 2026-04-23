@@ -720,7 +720,7 @@ static void initSystem() {
   disarmPowerStage();
 
   // Outer loop gains (tune)
-  pvc.Kp = 1.0f;
+  pvc.Kp = 1.5f;
   pvc.vel_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
   pvc.accel_limit = ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2;
   pvc.reset();

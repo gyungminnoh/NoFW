@@ -206,6 +206,84 @@ inner velocity PI는 일단 변경하지 않았다.
 
 판정: `pvc.Kp = 1.0`은 작은 step과 대각도 step 모두에서 overshoot와 tail error가 작다. 현재 검증 범위에서는 `pvc.Kp = 1.5`보다 더 안전한 설정이다.
 
+## 추가 튜닝: 반응 속도 개선
+
+사용자가 수동 테스트 중 반응이 너무 느리다고 보고했다.
+이 시점의 벤치 조건은 출력축에 부하/메커니즘이 연결되지 않은 상태이고, travel limit은 `-1080 .. 1080 deg`로 설정되어 있었다.
+
+측정 스크립트에 다음 시간 지표를 추가했다.
+
+- `t_90_s`: step 크기의 90% 지점에 처음 도달한 시간
+- `first_within_1deg_s`: target의 `±1 deg` 안에 처음 들어온 시간
+- `settle_within_1deg_s`: 이후 끝까지 `±1 deg` 안에 머문 첫 시간
+
+### 기존 `pvc.Kp = 1.0`, angle slew `60 deg/s^2`
+
+`-180 deg` step:
+
+- overshoot: `0.579 deg`
+- max absolute velocity: `93.988 deg/s`
+- `t_90_s`: `3.570 s`
+- `first_within_1deg_s`: `4.582 s`
+- `settle_within_1deg_s`: `4.582 s`
+
+판정: overshoot는 작지만, 체감 반응이 느릴 수 있다.
+
+### `pvc.Kp = 1.5`, angle slew `180 deg/s^2`
+
+`-180 deg` step:
+
+- overshoot: `0.638 deg`
+- tail error: `0.006 deg`
+- max absolute velocity: `144.360 deg/s`
+- `t_90_s`: `2.616 s`
+- `first_within_1deg_s`: `3.416 s`
+- `settle_within_1deg_s`: `3.416 s`
+
+`+180 deg` step:
+
+- overshoot: `1.332 deg`
+- tail error: `-0.004 deg`
+- max absolute velocity: `145.184 deg/s`
+- `t_90_s`: `2.608 s`
+- `first_within_1deg_s`: `3.407 s`
+- `settle_within_1deg_s`: `6.184 s`
+
+판정: 기존 `Kp = 1.0` 대비 90% 도달 시간이 약 `27%` 줄었고, 최고속도도 약 `50%` 증가했다. 한 방향에서 overshoot가 `1 deg`를 약간 넘지만 최종 오차는 거의 없다.
+
+### 기각한 더 공격적인 후보
+
+`pvc.Kp = 2.0`, angle slew `360 deg/s^2`:
+
+- `+180 deg` step overshoot: `2.565 deg`
+- `t_90_s`: `2.077 s`
+- `first_within_1deg_s`: `2.609 s`
+- `settle_within_1deg_s`: `4.583 s`
+
+`pvc.Kp = 1.8`, angle slew `240 deg/s^2`:
+
+- `-180 deg` step overshoot: `1.738 deg`
+- `+180 deg` step overshoot: `2.189 deg`
+- `t_90_s`: about `2.3 s`
+
+판정: 빠르지만 overshoot 증가가 커서 현재 기본값으로는 부적절하다.
+
+## Velocity Mode slew 조정
+
+velocity command도 수동 테스트에서 반응이 늦게 느껴질 수 있어 output-side velocity slew를 높였다.
+
+변경:
+
+- `ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 90.0 -> 180.0`
+
+`+60 deg/s`, `4 s` velocity step:
+
+- tail average: `59.277 deg/s`
+- tail error: `-0.723 deg/s`
+- max velocity: `60.700 deg/s`
+
+판정: 저속/중속 velocity command 추종은 현재 벤치 기준에서 충분히 안정적이다.
+
 ## 적용한 최종 계수
 
 ```cpp
@@ -214,13 +292,23 @@ motor.PID_velocity.I = 0.4;
 motor.PID_velocity.D = 0.0;
 motor.LPF_velocity.Tf = 0.007;
 
-pvc.Kp = 1.0f;
+pvc.Kp = 1.5f;
+```
+
+추가 반응속도 튜닝 후 최종 motion shaping:
+
+```cpp
+ACTUATOR_OUTPUT_VELOCITY_SLEW_DEG_S2 = 180.0f;
+ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 180.0f;
+
+pvc.Kp = 1.5f;
 ```
 
 ## 결론
 
 현재 문제의 주된 원인은 velocity PI보다 outer angle P gain이었다.
 
-`pvc.Kp`를 `20.0 -> 2.0 -> 1.5 -> 1.0`으로 낮춘 뒤, `+10 deg`, `+100 deg`, `+120 deg`, `-80 deg` step에서 overshoot가 충분히 작게 유지됐다.
+`pvc.Kp`를 `20.0 -> 2.0 -> 1.5 -> 1.0`으로 낮추면 overshoot는 매우 작아졌지만, 수동 테스트 반응은 느렸다.
+현재 벤치에서는 `pvc.Kp = 1.5`, angle-mode slew `180 deg/s^2`, velocity-mode slew `180 deg/s^2`가 더 적절한 균형이다.
 
-추가 고속/대각도 튜닝 전에는 UI 또는 CAN status에서 `output_min_deg`, `output_max_deg`, gear ratio를 볼 수 있게 만드는 것이 우선이다. 특히 음방향 대각도 테스트는 `output_min_deg = 0` 클램프에 걸리지 않는 시작 위치와 목표 위치를 먼저 확인해야 한다.
+추가 고속/대각도 튜닝 전에는 UI에서 현재 travel limit과 gear ratio를 확인하고, 명령 target이 범위 안에 있는지 먼저 확인해야 한다.
