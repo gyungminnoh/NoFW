@@ -1598,6 +1598,26 @@ The highest-priority remaining tasks are now:
 2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
 3. If the user still sees overshoot at specific large targets, reproduce that exact target sequence with `tools/control_tuning/can_step_response.py` and tune slew/accel limits rather than only Kp.
 
+Latest implementation step completed:
+
+- committed and pushed the angle overshoot retune
+- pushed commit:
+  - `2fb50e6 Reduce angle overshoot gain`
+- remote updated:
+  - `origin/main`
+- final firmware in the repo and on the board now uses:
+  - `pvc.Kp = 1.5f`
+- final checked board/UI state:
+  - active profile `As5600`
+  - `armed = false`
+  - command stream off
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
+3. If the user still sees overshoot at a specific command, capture the exact start angle, target angle, direction, and command sequence, then reproduce it with `tools/control_tuning/can_step_response.py`.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
