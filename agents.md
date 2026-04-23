@@ -1564,6 +1564,40 @@ The highest-priority remaining tasks are now:
 2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
 3. If higher-speed velocity tracking is required, tune inner velocity PI separately with longer velocity sweeps after travel status is visible.
 
+Latest implementation step completed:
+
+- retuned angle command overshoot after the user reported overshoot remained visible
+- safety first:
+  - found UI state was `armed = true` with an active angle stream
+  - immediately sent repeated `disarm` and `stop_stream`
+  - confirmed `armed = false`, stream off before tuning
+- measured current `pvc.Kp = 2.0` response in both directions:
+  - `+10 deg`: overshoot about `0.083 deg`
+  - `-10 deg`: overshoot about `0.071 deg`
+  - `+30 deg`: overshoot about `0.278 deg`
+  - `-30 deg`: overshoot about `0.271 deg`
+- changed angle outer-loop gain:
+  - `pvc.Kp = 2.0f -> 1.5f`
+- uploaded the firmware:
+  - `pio run -e custom_f446re`
+  - `pio run -e custom_f446re -t upload`
+- measured `pvc.Kp = 1.5` response:
+  - `+30 deg`: overshoot about `0.084 deg`, tail error about `0.049 deg`
+  - `-30 deg`: overshoot about `0.039 deg`, tail error about `-0.007 deg`
+  - `+60 deg`: overshoot about `0.170 deg`, tail error about `0.077 deg`
+- final state after tests:
+  - active profile `As5600`
+  - `armed = false`
+  - command stream off
+- updated tuning report:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
+3. If the user still sees overshoot at specific large targets, reproduce that exact target sequence with `tools/control_tuning/can_step_response.py` and tune slew/accel limits rather than only Kp.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:

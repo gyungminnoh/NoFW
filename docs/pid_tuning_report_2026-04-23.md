@@ -101,6 +101,60 @@ inner velocity PI는 일단 변경하지 않았다.
 
 판정: 현재 저속 검증 범위에서는 inner velocity PI가 크게 실패하지 않는다.
 
+## 추가 튜닝: angle command overshoot 재검증
+
+사용자가 angle command에서 여전히 overshoot가 있다고 보고해, travel 범위 안에서 양방향과 더 큰 step을 추가 측정했다.
+
+### `pvc.Kp = 2.0` 재검증
+
+`+10 deg` step:
+
+- overshoot: `0.083 deg`
+- tail error: `0.069 deg`
+- max absolute velocity: `11.206 deg/s`
+
+`-10 deg` step:
+
+- overshoot: `0.071 deg`
+- tail error: `-0.044 deg`
+- max absolute velocity: `10.657 deg/s`
+
+`+30 deg` step:
+
+- overshoot: `0.278 deg`
+- tail error: `0.185 deg`
+- max absolute velocity: `31.915 deg/s`
+
+`-30 deg` step:
+
+- overshoot: `0.271 deg`
+- tail error: `-0.191 deg`
+- max absolute velocity: `31.641 deg/s`
+
+판정: 기존 대비 매우 좋아졌지만, overshoot 억제를 더 우선하려면 Kp를 더 낮출 여지가 있음.
+
+### `pvc.Kp = 1.5` 재검증
+
+`+30 deg` step:
+
+- overshoot: `0.084 deg`
+- tail error: `0.049 deg`
+- max absolute velocity: `26.477 deg/s`
+
+`-30 deg` step:
+
+- overshoot: `0.039 deg`
+- tail error: `-0.007 deg`
+- max absolute velocity: `25.653 deg/s`
+
+`+60 deg` step:
+
+- overshoot: `0.170 deg`
+- tail error: `0.077 deg`
+- max absolute velocity: `48.230 deg/s`
+
+판정: `pvc.Kp = 1.5`가 현재 overshoot 억제 기준에서는 더 적절하다.
+
 ## 적용한 최종 계수
 
 ```cpp
@@ -109,13 +163,13 @@ motor.PID_velocity.I = 0.4;
 motor.PID_velocity.D = 0.0;
 motor.LPF_velocity.Tf = 0.007;
 
-pvc.Kp = 2.0f;
+pvc.Kp = 1.5f;
 ```
 
 ## 결론
 
 현재 문제의 주된 원인은 velocity PI보다 outer angle P gain이었다.
 
-`pvc.Kp`를 `20.0 -> 2.0`으로 낮춘 뒤, `+10 deg` step에서 overshoot 없이 안정적으로 수렴했다.
+`pvc.Kp`를 `20.0 -> 2.0 -> 1.5`로 낮춘 뒤, `±30 deg`와 `+60 deg` step에서 overshoot가 충분히 작게 유지됐다.
 
 추가 고속/대각도 튜닝 전에는 UI 또는 CAN status에서 `output_min_deg`, `output_max_deg`, gear ratio를 볼 수 있게 만드는 것이 우선이다.
