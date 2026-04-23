@@ -1543,6 +1543,27 @@ The highest-priority remaining tasks are now:
 2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
 3. If higher-speed velocity tracking is required, tune inner velocity PI separately with longer velocity sweeps after travel status is visible.
 
+Latest implementation step completed:
+
+- committed and pushed the angle-loop tuning and step-response tooling
+- pushed commit:
+  - `2f84e49 Tune angle loop and add step response tool`
+- remote updated:
+  - `origin/main`
+- final current firmware tuning:
+  - `pvc.Kp = 2.0f`
+  - inner velocity PI unchanged
+- final checked board/UI state:
+  - active profile `As5600`
+  - `armed = false`
+  - command stream off
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
+3. If higher-speed velocity tracking is required, tune inner velocity PI separately with longer velocity sweeps after travel status is visible.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
