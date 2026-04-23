@@ -41,6 +41,8 @@ LINK_ALIVE_WINDOW_S = 1.5
 MAX_STD_CAN_ID = 0x7FF
 MAX_CLASSIC_CAN_DLC = 8
 MAX_COMMAND_ABS_VALUE = 1_000_000.0
+DISARM_REPEAT_COUNT = 3
+DISARM_REPEAT_DELAY_S = 0.02
 
 
 def clamp_node_id(node_id: int) -> int:
@@ -339,12 +341,18 @@ class CanUiBridge:
     def set_power(self, armed: bool) -> None:
         if not isinstance(armed, bool):
             raise ValueError("armed must be a boolean")
-        self.send_one_shot("power", armed)
         if not armed:
             with self._lock:
                 self._command_mode = None
                 self._command_value = 0.0
                 self._stream_enabled = False
+            for idx in range(DISARM_REPEAT_COUNT):
+                self.send_one_shot("power", False)
+                if idx + 1 < DISARM_REPEAT_COUNT:
+                    time.sleep(DISARM_REPEAT_DELAY_S)
+            return
+
+        self.send_one_shot("power", True)
 
     def set_angle_target(self, angle_deg: float) -> None:
         angle_deg = ensure_finite_command_value(angle_deg, "angle")

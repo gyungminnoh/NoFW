@@ -1505,6 +1505,44 @@ The highest-priority remaining tasks are now:
 2. Continue manual UI motion validation from the current `As5600` state using only small inward angle steps until travel limit visibility is added.
 3. Consider adding CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so the UI and upper controller do not depend on undocumented stored config assumptions.
 
+Latest implementation step completed:
+
+- tuned the angle outer loop and checked low-speed velocity behavior
+- added repeatable CAN/UI step-response measurement tool:
+  - [tools/control_tuning/can_step_response.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/control_tuning/can_step_response.py)
+- safety improvement made before tuning:
+  - UI backend now repeats `disarm` frames and clears stream before sending them
+  - tuning script now repeats and confirms `disarm` before exiting
+- baseline finding:
+  - old `pvc.Kp = 20.0` produced excessive angle overshoot
+  - `+5 deg` step overshoot was about `4.418 deg`
+- tested angle Kp values:
+  - `Kp = 5.0`: `+5 deg` improved, but `+10 deg` still overshot about `2.719 deg`
+  - `Kp = 3.0`: `+10 deg` overshot about `1.228 deg`
+  - `Kp = 2.0`: `+10 deg` overshoot was `0.000 deg`, tail error about `-0.031 deg`
+- final applied tuning:
+  - `pvc.Kp = 2.0f`
+  - inner velocity PI left unchanged for now:
+    - `P = 0.12`
+    - `I = 0.4`
+    - `D = 0.0`
+- low-speed velocity check after angle tuning:
+  - `+5 deg/s` for `3 s`
+  - tail average about `4.633 deg/s`
+  - tail error about `-0.367 deg/s`
+  - final state confirmed `armed = false`, stream off
+- build/upload:
+  - `pio run -e custom_f446re` passed
+  - `pio run -e custom_f446re -t upload` passed
+- documented results:
+  - [docs/pid_tuning_report_2026-04-23.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/pid_tuning_report_2026-04-23.md)
+
+The highest-priority remaining tasks are now:
+
+1. Add UI-visible travel limit/status information before larger manual angle tests, because the current output coordinate can be outside the stored `0 .. max` range.
+2. Add CAN-visible actuator config/status frames for `output_min_deg`, `output_max_deg`, and gear ratio so UI/manual tuning can reason about travel range explicitly.
+3. If higher-speed velocity tracking is required, tune inner velocity PI separately with longer velocity sweeps after travel status is visible.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
