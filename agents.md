@@ -1375,6 +1375,27 @@ The highest-priority remaining tasks are now:
 2. If the user intends to command motion next, confirm the driver should be armed and start with conservative small angle/velocity commands.
 3. Keep the upper-layer integration guide, manual checklist, user guide, and UI behavior aligned with firmware behavior as new changes are made.
 
+Latest implementation step completed:
+
+- committed and pushed the current AS5600/profile/UI/documentation work to GitHub
+- pushed commit:
+  - `229e672 Fix AS5600 profile entry and improve CAN UI`
+- remote updated:
+  - `origin/main`
+- included in that pushed commit:
+  - firmware fix for first-time `As5600` profile entry
+  - CAN web UI MVP
+  - explicit UI profile command confirmation/pending/failure feedback
+  - upper-layer integration guide
+  - user/manual/CAN protocol documentation updates
+  - updated running-work log in this file
+
+The highest-priority remaining tasks are now:
+
+1. Run the browser-based manual control test in `As5600` profile while staying disarmed until the user intentionally arms the driver.
+2. If the user intends to command motion next, confirm the driver should be armed and start with conservative small angle/velocity commands.
+3. Keep firmware behavior, UI behavior, documentation, and this work log synchronized as future changes are made.
+
 ## Important Constraints For Future Work
 
 - The actuator profile may vary by product:
