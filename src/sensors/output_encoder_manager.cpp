@@ -122,7 +122,6 @@ void OutputEncoderManager::updateZeroOffset(float zero_rad, uint32_t magic) {
       As5600CalibrationData calibration = output_encoder_as5600_.calibration();
       calibration.magic = magic;
       calibration.zero_offset_rad = zero_rad;
-      calibration.invert = false;
       calibration.valid = true;
       output_encoder_as5600_.setCalibration(calibration);
       break;

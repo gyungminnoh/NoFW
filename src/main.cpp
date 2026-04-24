@@ -740,11 +740,18 @@ static bool armPowerStage() {
 
   if (actuator_config.output_encoder_type == OutputEncoderType::As5600 &&
       !calibration_bundle.as5600.valid) {
+    float as5600_zero_rad = 0.0f;
+    if (!readAs5600AngleRad(as5600_zero_rad)) {
+      disarmPowerStage();
+      g_need_calibration = true;
+      return false;
+    }
     calibration_bundle.as5600 = {};
     calibration_bundle.as5600.magic = kCalibrationRecordMagic;
-    calibration_bundle.as5600.zero_offset_rad = ActuatorAPI::output_zero_ref_rad;
+    calibration_bundle.as5600.zero_offset_rad = as5600_zero_rad;
     calibration_bundle.as5600.invert = false;
     calibration_bundle.as5600.valid = true;
+    ActuatorAPI::output_zero_ref_rad = as5600_zero_rad;
     ConfigStore::saveCalibrationBundleCompat(calibration_bundle);
   }
 

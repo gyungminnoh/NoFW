@@ -2218,3 +2218,42 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - add CAN-visible result/status for output encoder auto-calibration success/failure
   - expose output encoder config and auto-calibration in the web UI
+
+## 2026-04-25 - Fresh FRAM validation
+
+- Completed:
+  - added a dedicated FRAM erase utility firmware:
+    - environment: `fram_erase_f446re`
+    - source: [src/fram_erase/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/fram_erase/main.cpp)
+    - status CAN ID: `0x5E7`
+    - erases and verifies all `8192` bytes of FM25CL64B FRAM
+  - uploaded `fram_erase_f446re` and confirmed it reached the post-erase loop:
+    - `0x5E7 = FE 7F 00 20 00 00 00 00`
+  - fixed a fresh-FRAM bug in [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp):
+    - when AS5600 calibration was missing, `armPowerStage()` now reads the current AS5600 raw angle and stores it as the initial zero
+    - before this fix, fresh AS5600 zero could be incorrectly initialized to `0 rad`
+  - fixed [src/sensors/output_encoder_manager.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/sensors/output_encoder_manager.cpp):
+    - updating AS5600 zero offset no longer resets the stored `invert` flag
+  - uploaded `custom_f446re` after FRAM erase
+  - verified fresh boot:
+    - default config was recreated
+    - `0x5F7 = FB 01 01 01 01 01 01 01`
+    - profile `As5600`, active `As5600`, `need_calibration = 1`, `armed = 0`
+    - default limits `0 .. 2160 deg`
+    - gear ratio `8.000`
+  - sent first arm command after fresh boot:
+    - `0x5F7 = FB 01 01 01 01 01 00 03`
+    - FOC and AS5600 zero were created and calibration required cleared
+  - disarmed and re-uploaded the same main firmware to force a reset
+  - verified persisted calibration after reset:
+    - `0x5F7 = FB 01 01 01 01 01 00 01`
+    - `need_calibration = 0`
+    - `armed = 0`
+  - ran AS5600 direction auto-calibration on the fresh state with `cansend can0 277#01`
+  - verified subsequent arm moved from about `5.1 deg` toward `0 deg`
+  - final disarmed state:
+    - `0x5F7 = FB 01 01 01 01 01 00 01`
+    - output angle settled near `0.05 .. 0.11 deg`
+- Next:
+  - add CAN-visible result/status for output encoder auto-calibration success/failure
+  - expose FRAM erase/first-boot provisioning as an explicit manufacturing or service procedure document
