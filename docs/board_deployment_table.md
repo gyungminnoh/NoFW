@@ -27,14 +27,14 @@ wheel 위치 표기는 다음을 기준으로 한다.
 
 | board label | wheel pos | role | planned node_id | primary CAN ids | profile | control capability | gear ratio | travel limits (deg) | output encoder policy | note |
 |---|---|---|---:|---|---|---|---|---|---|---|
-| `S01` | `FL` | steering front-left | `2` | angle cmd `0x202`, angle status `0x402` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S02` | `FR` | steering front-right | `3` | angle cmd `0x203`, angle status `0x403` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S03` | `BL` | steering back-left | `4` | angle cmd `0x204`, angle status `0x404` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S04` | `BR` | steering back-right | `1` | angle cmd `0x201`, angle status `0x401` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `D01` | `FL` | driving front-left | `18` | velocity cmd `0x212`, velocity status `0x412` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D02` | `FR` | driving front-right | `19` | velocity cmd `0x213`, velocity status `0x413` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D03` | `BL` | driving back-left | `20` | velocity cmd `0x214`, velocity status `0x414` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D04` | `BR` | driving back-right | `17` | velocity cmd `0x211`, velocity status `0x411` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `S01` | `FR` | steering front-right | `2` | angle cmd `0x202`, angle status `0x402` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S02` | `BR` | steering back-right | `3` | angle cmd `0x203`, angle status `0x403` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S03` | `FL` | steering front-left | `4` | angle cmd `0x204`, angle status `0x404` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S04` | `BL` | steering back-left | `1` | angle cmd `0x201`, angle status `0x401` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `D01` | `FR` | driving front-right | `18` | velocity cmd `0x212`, velocity status `0x412` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D02` | `BR` | driving back-right | `19` | velocity cmd `0x213`, velocity status `0x413` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D03` | `FL` | driving front-left | `20` | velocity cmd `0x214`, velocity status `0x414` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D04` | `BL` | driving back-left | `17` | velocity cmd `0x211`, velocity status `0x411` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
 | `G01` | `-` | gripper | `31` | angle cmd `0x21F`, angle status `0x41F` | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
 
 ## 적용 규칙

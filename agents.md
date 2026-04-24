@@ -2083,15 +2083,15 @@ When working on hardware-related tasks in this repo, prefer this order:
     with a board labeling, build, upload, and CAN verification procedure for multi-board deployment
   - added [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
     for the planned 9-board deployment:
-    - steering `S01..S04`, `As5600`, `50:1`, node ids `11..14`
-    - driving `D01..D04`, `VelocityOnly`, `78:15`, node ids `21..24`
+    - steering `S01..S04`, `As5600`, `50:1`, node ids `2,3,4,1`
+    - driving `D01..D04`, `VelocityOnly`, `78:15`, node ids `18,19,20,17`
     - gripper `G01`, `As5600`, `30:1`, node id `31`
   - updated deployment travel limits:
     - steering boards: `-120 ~ 120 deg`
     - gripper board: `0 ~ 90 deg`
   - updated the planned wheel-position CAN assignment:
-    - steering: `FL=2`, `FR=3`, `BL=4`, `BR=1`
-    - driving: `FL=18`, `FR=19`, `BL=20`, `BR=17`
+    - steering: `FR=2`, `BR=3`, `FL=4`, `BL=1`
+    - driving: `FR=18`, `BR=19`, `FL=20`, `BL=17`
     - documented the corresponding command/status CAN IDs in
       [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
   - audited deployment-related code and removed/fixed stale paths:
