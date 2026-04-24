@@ -35,6 +35,12 @@ The agent can use the following capabilities in this environment.
 - After each meaningful implementation step, update this `agents.md` file with:
   - what was just completed
   - what the next highest-priority task is
+- After every firmware feature addition or behavior change, run the available unit/spec tests before closing the task.
+  At minimum, run:
+  - `python3 tools/can_spec_test.py --protocol-only`
+  If hardware/CAN is connected and motion is allowed for the task, also run the appropriate live mode:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id <id>`
+  - add `--allow-arm` or `--allow-motion` only when arming/motion is explicitly safe for that session.
 - Unless a real user decision is required, do not stop at a checkpoint.
   Continue directly to the next highest-priority task.
 - If `CAN` observation is needed and the Linux interface is down, first try to bring up `can0` at `1 Mbps`.
