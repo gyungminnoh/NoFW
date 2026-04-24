@@ -169,6 +169,13 @@ candump can0,5F7:7FF
 - data[7] bit0 = output feedback required = `1`
 - data[7] bit1 = power stage armed = `0`
 
+### 6.4 CAN node ID 동기화
+
+- 이 펌웨어는 부팅 중 `ActuatorConfig`를 읽을 때, FRAM에 저장된 `can_node_id`가
+  현재 펌웨어의 `CAN_NODE_ID`와 다르면 FRAM 값을 펌웨어 값으로 덮어쓴다.
+- 즉 현재 빌드에 포함된 `CAN_NODE_ID`가 최종적으로 우선한다.
+- 여러 보드에 서로 다른 ID를 쓰려면 보드별로 다른 `CAN_NODE_ID`로 빌드/업로드하면 된다.
+
 즉 이 상태는:
 
 - profile과 calibration은 정상적으로 읽혔고

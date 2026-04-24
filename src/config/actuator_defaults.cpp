@@ -59,15 +59,22 @@ ActuatorConfig buildLegacyActuatorConfig() {
 }
 
 bool migrateStaleActuatorConfigDefaults(ActuatorConfig& cfg) {
+  bool changed = false;
+
+  if (cfg.can_node_id != CAN_NODE_ID) {
+    cfg.can_node_id = CAN_NODE_ID;
+    changed = true;
+  }
+
   if (!nearlyEqual_(cfg.gear_ratio, kLegacyWrongGearRatio)) {
-    return false;
+    return changed;
   }
 
   // Migrate only the known stale default fingerprint that shipped with the
   // incorrect compile-time ratio. Do not rewrite arbitrary user-tuned configs.
   if (!nearlyEqual_(cfg.output_min_deg, kLegacyWrongOutputMinDeg) ||
       !nearlyEqual_(cfg.output_max_deg, kLegacyWrongOutputMaxDeg)) {
-    return false;
+    return changed;
   }
 
   cfg.gear_ratio = GEAR_RATIO;

@@ -2063,3 +2063,22 @@ When working on hardware-related tasks in this repo, prefer this order:
 3. upload it if hardware is connected
 4. inspect `CAN` output with `candump`
 5. interpret the result before making additional firmware changes
+
+## 2026-04-25 - CAN node ID boot-time sync
+
+- Completed:
+  - changed actuator-config migration so boot now compares stored `can_node_id`
+    against compile-time `CAN_NODE_ID`
+  - if the two differ, firmware now overwrites the FRAM-stored `can_node_id`
+    with the firmware value during boot
+  - updated [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+    and [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+    to document that firmware `CAN_NODE_ID` takes precedence over stored FRAM node ID
+  - built and uploaded the main firmware to hardware
+  - live CAN validation passed:
+    - before test: board responded on `0x407`, `0x417`, `0x5F7`
+    - with temporary firmware `CAN_NODE_ID = 8`: board responded on `0x408`, `0x418`, `0x5F8`
+    - restored final firmware `CAN_NODE_ID = 7`: board responded again on `0x407`, `0x417`, `0x5F7`
+- Next:
+  - if multiple boards will be provisioned regularly, add a short manufacturing/deployment note
+    that maps each board to its dedicated firmware `CAN_NODE_ID`
