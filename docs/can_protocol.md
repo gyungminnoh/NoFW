@@ -236,6 +236,8 @@ Payload:
 - 부팅 직후 메인 펌웨어는 기본적으로 `disarmed` 상태다
 - 즉, 보드 전원 인가만으로는 전력단을 자동으로 켜지 않는다
 - 실제 구동 전에는 먼저 `0x230 + node_id`로 arm 명령을 보내야 한다
+- `As5600`/`TmagLut`처럼 출력축 절대 기준을 읽는 profile에서는 부팅 기준 정렬 성공 시 초기 angle target이 `0 deg`다
+- 따라서 부팅 직후 별도 angle command 없이 arm하면 저장된 출력축 원점으로 이동하려고 한다
 
 예시:
 
@@ -293,7 +295,8 @@ Payload:
 - `0.001 <= gear_ratio <= 1000.000`
 - 현재 profile이 `DirectInput`이면 `gear_ratio == 1.000`일 때만 적용 가능
 
-gear ratio 변경은 출력축 좌표계 해석을 바꾸므로, 적용 시 펌웨어는 boot reference를 다시 잡고 current-angle hold 상태로 돌아간다.
+gear ratio 변경은 출력축 좌표계 해석을 바꾸므로, 적용 시 펌웨어는 boot reference를 다시 잡는다.
+출력축 절대 기준을 읽을 수 있으면 초기 target은 `0 deg`가 되고, 그렇지 않으면 current-angle hold 상태로 돌아간다.
 
 예시:
 

@@ -263,14 +263,17 @@ void refreshBootReference() {
   mt.reset(raw);
 
   float output_boot_rad = 0.0f;
-  if (outputEncoderRequired(actuator_config) && readOutputEncoderAbsolute(output_boot_rad)) {
+  const bool have_output_boot_reference =
+      outputEncoderRequired(actuator_config) && readOutputEncoderAbsolute(output_boot_rad);
+  if (have_output_boot_reference) {
     ActuatorAPI::setBootReference(mt.mt_angle, output_boot_rad);
   } else {
     ActuatorAPI::setBootReferenceFromMotor(mt.mt_angle);
   }
-  // Do not command motion automatically at boot. Hold the current aligned output position
-  // until the first explicit angle/velocity command arrives.
-  ActuatorAPI::target_output_deg = ActuatorAPI::motorMTToOutputRawDeg(mt.mt_angle);
+  // With an absolute output reference, boot into an output-zero target. The power
+  // stage still remains disarmed until an explicit CAN arm command is received.
+  ActuatorAPI::target_output_deg =
+      have_output_boot_reference ? 0.0f : ActuatorAPI::motorMTToOutputRawDeg(mt.mt_angle);
   ActuatorAPI::target_output_velocity_deg_s = 0.0f;
 }
 

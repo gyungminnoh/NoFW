@@ -219,6 +219,9 @@ cansend can0 237#00
 - 메인 펌웨어는 부팅 직후 기본적으로 power stage `disarmed` 상태로 올라온다
 - 즉 보드에 전원을 넣었다고 해서 gate와 FOC가 자동으로 켜지지 않는다
 - 실제 모터 구동 전에 먼저 arm 명령을 보내야 한다
+- `As5600`/`TmagLut`처럼 부팅 시 출력축 절대 기준을 읽는 profile에서는, 기준 읽기에 성공하면 초기 angle target은 `0 deg`로 설정된다
+- 따라서 별도 angle command 없이 바로 arm하면 저장된 출력축 원점 `0 deg`로 이동하려고 한다
+- 출력축 절대 기준 읽기에 실패하거나 `VelocityOnly`처럼 별도 출력축 기준이 없는 profile이면 현재 위치 hold target으로 시작한다
 
 ## 7.1 출력축 각도 명령
 
@@ -534,7 +537,9 @@ cansend can0 257#401F0000
 ```
 
 gear ratio 변경은 출력축 좌표계 해석 자체를 바꾼다.
-적용 후에는 boot reference를 다시 잡고 current-angle hold 상태로 돌아간다.
+적용 후에는 boot reference를 다시 잡는다.
+출력축 절대 기준을 읽을 수 있는 profile이면 초기 target은 `0 deg`가 되고,
+출력축 기준이 없으면 current-angle hold 상태로 돌아간다.
 `DirectInput` profile은 `gear_ratio == 1.000`일 때만 유효하다.
 `TmagLut` profile은 저장된 TMAG calibration의 learned gear ratio와 현재 gear ratio가 다르면 calibration required 상태가 된다.
 

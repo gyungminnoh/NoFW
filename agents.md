@@ -2110,3 +2110,27 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - replace the temporary board labels with final physical labels or serial numbers when available
   - document the gripper zero-setting workflow once the actual mechanical zero procedure is fixed
+
+## 2026-04-25 - Boot output-zero target
+
+- Completed:
+  - changed [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp) so `refreshBootReference()` sets the initial angle target to `0 deg` when an absolute output reference is available at boot
+  - kept the existing boot-safe behavior: the power stage still starts `disarmed`, so the actuator moves toward `0 deg` only after an explicit CAN arm command
+  - preserved current-position hold fallback when the output absolute reference is unavailable or when the selected profile does not require an output encoder
+  - updated:
+    - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+    - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+    - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+    - [docs/manual_can_test_checklist.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/manual_can_test_checklist.md)
+  - verified build with `pio run -e custom_f446re`
+  - uploaded the revised firmware with `pio run -e custom_f446re -t upload`
+  - confirmed CAN runtime diagnostics after upload:
+    - `0x5F7 = FB 01 01 01 01 01 00 01`
+    - stored profile = `As5600`
+    - active profile = `As5600`
+    - calibration required = `0`
+    - power stage armed = `0`
+    - limits/status frames were present on `0x427` and `0x437`
+- Next:
+  - when the user confirms the mechanism is safe to move, arm once and validate that the first motion goes toward stored `0 deg`
+  - if that first-arm motion is too abrupt, add a boot-homing speed cap or a separate explicit home command instead of using the normal angle target immediately

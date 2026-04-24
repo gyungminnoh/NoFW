@@ -152,7 +152,8 @@ candump can0,5F7:7FF
 
 눈으로 볼 점:
 
-- arm 자체만으로 큰 튐이 없어야 한다
+- 출력축 절대 기준을 읽는 profile에서는 부팅 직후 초기 angle target이 `0 deg`이므로, 별도 target을 보내지 않고 arm하면 저장된 원점으로 이동하려고 한다
+- 현재 위치를 유지한 채 arm하려면 arm 전에 현재 출력각을 확인하고 그 값을 angle target으로 먼저 보내야 한다
 
 ### 4.2 Disarm
 
