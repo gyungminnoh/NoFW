@@ -2134,3 +2134,19 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - when the user confirms the mechanism is safe to move, arm once and validate that the first motion goes toward stored `0 deg`
   - if that first-arm motion is too abrupt, add a boot-homing speed cap or a separate explicit home command instead of using the normal angle target immediately
+
+## 2026-04-25 - First-arm output-zero motion validation
+
+- Completed:
+  - with the user confirming that physical motion was safe, sent CAN arm command `0x237#01`
+  - observed CAN position/status while the firmware moved from about `-67.3 deg` toward the boot target `0 deg`
+  - observed final position near `0.05 ~ 0.10 deg`
+  - sent CAN disarm command `0x237#00`
+  - confirmed runtime diagnostic returned to `0x5F7 = FB 01 01 01 01 01 00 01`
+    - stored profile = `As5600`
+    - active profile = `As5600`
+    - calibration required = `0`
+    - power stage armed = `0`
+- Next:
+  - if the first-arm homing motion feels too fast or abrupt on the real mechanism, add a dedicated boot-homing velocity cap or explicit home command
+  - otherwise keep this behavior as the default absolute-output-reference boot behavior
