@@ -2289,3 +2289,30 @@ When working on hardware-related tasks in this repo, prefer this order:
   - add CAN-visible result/status for output encoder auto-calibration success/failure
   - extend the spec runner after that change so it can assert AS5600 direction auto-calibration result codes directly
   - expose output encoder config and auto-calibration in the web UI
+
+## 2026-04-25 - CAN spec runner arm/motion validation
+
+- Completed:
+  - user confirmed that arming and motion were allowed
+  - ran the full gated test:
+    - `python3 tools/can_spec_test.py --iface can0 --node-id 7 --allow-motion --report docs/can_spec_test_latest.json`
+    - result: `18/18` passed
+  - additional passed checks beyond default live mode:
+    - power-stage arm/disarm status transition
+    - profile/config command rejection while armed
+    - small angle command response
+    - small velocity command response
+  - observed motion test details:
+    - angle step: `0.159 -> 1.420 deg` toward target `2.159 deg`
+    - velocity step: observed `9.723 deg/s`
+  - confirmed final CAN state after test:
+    - `0x5F7 = FB 01 01 01 01 01 10 01`
+    - profile `As5600`
+    - profile-select result `Ok`
+    - power stage `disarmed`
+    - limits restored to `0 .. 2160 deg`
+    - gear ratio restored to `8.000`
+- Next:
+  - add CAN-visible result/status for output encoder auto-calibration success/failure
+  - extend the spec runner after that change so it can assert AS5600 direction auto-calibration result codes directly
+  - expose output encoder config and auto-calibration in the web UI
