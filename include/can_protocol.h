@@ -17,6 +17,7 @@ namespace CanProtocol {
   uint16_t actuatorLimitsConfigCmdCanId(uint8_t node_id);
   uint16_t actuatorGearConfigCmdCanId(uint8_t node_id);
   uint16_t outputEncoderConfigCmdCanId(uint8_t node_id);
+  uint16_t outputEncoderAutoCalCmdCanId(uint8_t node_id);
 
   bool decodeOutputAngleDeg_OptionA(const uint8_t data[8], uint8_t len, float& out_angle_deg);
   bool encodeOutputAngleDeg_OptionA(float angle_deg, uint8_t data[8], uint8_t& out_len);
@@ -61,5 +62,8 @@ namespace CanProtocol {
                                             uint8_t len,
                                             OutputEncoderType& out_encoder_type,
                                             bool& out_invert);
+  bool decodeOutputEncoderAutoCalCmd_OptionA(const uint8_t data[8],
+                                             uint8_t len,
+                                             OutputEncoderType& out_encoder_type);
 
 }

@@ -63,6 +63,8 @@ static uint32_t g_last_angle_mode_cmd_ms = 0;
 
 static void resetVelocityCommandRamp();
 static void resetAngleModeCommandRamp();
+static void disarmPowerStage();
+static bool armPowerStage();
 
 namespace {
 constexpr uint16_t kCalPressMs = 1000;
@@ -73,6 +75,9 @@ constexpr uint32_t kRuntimeDiagPeriodMs = 500;
 constexpr float kMinGearRatio = 0.001f;
 constexpr float kMaxGearRatio = 1000.0f;
 constexpr float kMaxConfigAbsDeg = 1000000.0f;
+constexpr float kAs5600AutoCalOutputVelocityDegS = 10.0f;
+constexpr uint32_t kAs5600AutoCalMoveMs = 500;
+constexpr float kAs5600AutoCalMinDeltaRad = 0.02f;
 bool g_need_calibration = false;
 
 enum class ProfileSelectResult : uint8_t {
@@ -363,6 +368,83 @@ bool applyOutputEncoderConfig(OutputEncoderType encoder_type,
   }
 
   reconfigureRuntimeAfterActuatorConfigChange(current_motor_mt_rad, true);
+  return true;
+}
+
+float wrapToPi(float angle_rad) {
+  while (angle_rad > PI) angle_rad -= 2.0f * PI;
+  while (angle_rad < -PI) angle_rad += 2.0f * PI;
+  return angle_rad;
+}
+
+bool applyOutputEncoderAutoCalibration(OutputEncoderType encoder_type,
+                                       float current_motor_mt_rad) {
+  if (g_power_stage_armed || encoder_type != OutputEncoderType::As5600 ||
+      actuator_config.output_encoder_type != OutputEncoderType::As5600) {
+    return false;
+  }
+
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  if (!calibration_bundle.as5600.valid) {
+    return false;
+  }
+
+  float raw_before = 0.0f;
+  if (!readAs5600AngleRad(raw_before)) {
+    return false;
+  }
+
+  sensor.update();
+  mt.reset(sensor.getAngle());
+  if (!armPowerStage()) {
+    return false;
+  }
+
+  const uint32_t start_ms = millis();
+  const float motor_velocity_cmd =
+      ActuatorAPI::outputVelocityDegPerSecToMotorVelocity(kAs5600AutoCalOutputVelocityDegS);
+  while ((uint32_t)(millis() - start_ms) < kAs5600AutoCalMoveMs) {
+    motor.loopFOC();
+    sensor.update();
+    mt.update(sensor.getAngle());
+    motor.move(motor_velocity_cmd);
+  }
+
+  motor.move(0.0f);
+  for (uint8_t i = 0; i < 20; ++i) {
+    motor.loopFOC();
+    motor.move(0.0f);
+    delay(2);
+  }
+
+  float raw_after = 0.0f;
+  const bool read_after_ok = readAs5600AngleRad(raw_after);
+
+  sensor.update();
+  const float pos_after = mt.update(sensor.getAngle());
+  disarmPowerStage();
+
+  if (!read_after_ok) {
+    reconfigureRuntimeAfterActuatorConfigChange(pos_after, true);
+    return false;
+  }
+
+  const float raw_delta = wrapToPi(raw_after - raw_before);
+  if (fabsf(raw_delta) < kAs5600AutoCalMinDeltaRad) {
+    reconfigureRuntimeAfterActuatorConfigChange(pos_after, true);
+    return false;
+  }
+
+  calibration_bundle.as5600.magic = kCalibrationRecordMagic;
+  calibration_bundle.as5600.invert = (raw_delta < 0.0f);
+  calibration_bundle.as5600.valid = true;
+  if (!ConfigStore::saveCalibrationBundleCompat(calibration_bundle)) {
+    reconfigureRuntimeAfterActuatorConfigChange(pos_after, true);
+    return false;
+  }
+
+  reconfigureRuntimeAfterActuatorConfigChange(pos_after, true);
   return true;
 }
 
@@ -826,6 +908,12 @@ void loop() {
       return;
     }
 
+    OutputEncoderType requested_encoder_auto_cal = OutputEncoderType::As5600;
+    if (CanService::takePendingOutputEncoderAutoCalibration(requested_encoder_auto_cal)) {
+      applyOutputEncoderAutoCalibration(requested_encoder_auto_cal, pos_mt);
+      return;
+    }
+
     bool power_stage_enable = false;
     if (CanService::takePendingPowerStageEnable(power_stage_enable) && power_stage_enable) {
       armPowerStage();
@@ -983,6 +1071,11 @@ void loop() {
   bool requested_encoder_invert = false;
   if (CanService::takePendingOutputEncoderConfig(
           requested_encoder_type, requested_encoder_invert)) {
+    // Travel/config changes are intentionally ignored while armed.
+  }
+
+  OutputEncoderType requested_encoder_auto_cal = OutputEncoderType::As5600;
+  if (CanService::takePendingOutputEncoderAutoCalibration(requested_encoder_auto_cal)) {
     // Travel/config changes are intentionally ignored while armed.
   }
 

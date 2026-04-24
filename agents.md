@@ -2176,3 +2176,30 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - expose AS5600 invert in the web UI so users do not have to send raw CAN frames
   - add output encoder config status reporting if upper controllers need to read back the stored invert flag
+
+## 2026-04-25 - AS5600 direction auto-calibration command
+
+- Completed:
+  - added CAN command `0x270 + node_id` for output encoder direction auto-calibration
+    - for node `7`: `0x277#01`
+    - currently supports `As5600`
+    - accepted only while the power stage is disarmed
+  - auto-calibration sequence:
+    - read AS5600 raw angle before motion
+    - temporarily arm the power stage
+    - move a small positive output-axis velocity command
+    - read AS5600 raw angle after motion
+    - save `as5600.invert = false` when raw angle increases
+    - save `as5600.invert = true` when raw angle decreases
+    - disarm and refresh boot reference
+  - documented the command in [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - built and uploaded `custom_f446re`
+  - live validation:
+    - boot/status before command showed `0x5F7 = FB 01 01 01 01 01 00 01`
+    - sent `cansend can0 277#01`
+    - command performed a short positive-direction motion and returned to `armed = 0`
+    - subsequent arm moved from about `5.3 deg` back toward `0 deg`
+    - final disarmed position was around `-0.09 deg`
+- Next:
+  - add CAN-visible result/status for output encoder auto-calibration success/failure
+  - expose the manual invert setting and auto-calibration command in the web UI

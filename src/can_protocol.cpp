@@ -48,6 +48,10 @@ uint16_t outputEncoderConfigCmdCanId(uint8_t node_id) {
   return CAN_ID_OUTPUT_ENCODER_CONFIG_CMD_BASE + node_id;
 }
 
+uint16_t outputEncoderAutoCalCmdCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_ENCODER_AUTO_CAL_CMD_BASE + node_id;
+}
+
 namespace {
 
 bool decodeInt32MUnits_(const uint8_t data[8], uint8_t len, float& out_value) {
@@ -215,6 +219,18 @@ bool decodeOutputEncoderConfigCmd_OptionA(const uint8_t data[8],
   }
   out_encoder_type = encoder_type;
   out_invert = (data[1] != 0);
+  return true;
+}
+
+bool decodeOutputEncoderAutoCalCmd_OptionA(const uint8_t data[8],
+                                           uint8_t len,
+                                           OutputEncoderType& out_encoder_type) {
+  if (len < 1) return false;
+  const auto encoder_type = static_cast<OutputEncoderType>(data[0]);
+  if (encoder_type != OutputEncoderType::As5600) {
+    return false;
+  }
+  out_encoder_type = encoder_type;
   return true;
 }
 

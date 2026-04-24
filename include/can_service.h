@@ -15,4 +15,5 @@ namespace CanService {
   bool takePendingActuatorGearConfig(float& out_gear_ratio);
   bool takePendingOutputEncoderConfig(OutputEncoderType& out_encoder_type,
                                       bool& out_invert);
+  bool takePendingOutputEncoderAutoCalibration(OutputEncoderType& out_encoder_type);
 }

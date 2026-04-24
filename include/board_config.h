@@ -65,6 +65,7 @@ static constexpr uint16_t CAN_ID_POWER_STAGE_CMD_BASE = 0x230;
 static constexpr uint16_t CAN_ID_ACTUATOR_LIMITS_CONFIG_CMD_BASE = 0x240;
 static constexpr uint16_t CAN_ID_ACTUATOR_GEAR_CONFIG_CMD_BASE = 0x250;
 static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_CONFIG_CMD_BASE = 0x260;
+static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_AUTO_CAL_CMD_BASE = 0x270;
 
 // CAN uses the board's default CAN1 pin mapping provided by the STM32 core.
 // Transceiver: SN65HVD230 (no SW control unless STB/RS wired to MCU)

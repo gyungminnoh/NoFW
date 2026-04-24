@@ -336,6 +336,38 @@ cansend can0 267#0100
 cansend can0 267#0101
 ```
 
+## Output Encoder Direction Auto-Calibration Command
+
+- ID: `0x270 + node_id`
+- 기본 node `7`이면 `0x277`
+- DLC: `1`
+- 의미: 출력축 엔코더 방향을 자동 판정하고 `FRAM`에 저장
+- 적용 조건:
+  - power stage가 `disarmed` 상태일 때만 시작
+  - 현재 profile이 `As5600`
+  - 저장된 AS5600 zero calibration이 있어야 함
+
+Payload:
+
+- `data[0] = output_encoder_type`
+  - `1` = `As5600`
+
+동작:
+
+1. 현재 AS5600 raw angle을 읽는다.
+2. 펌웨어가 잠시 power stage를 arm한다.
+3. 양의 출력축 방향으로 짧게 구동한다.
+4. 이동 후 AS5600 raw angle을 다시 읽는다.
+5. raw angle이 양의 방향으로 변했으면 `invert = 0`, 음의 방향으로 변했으면 `invert = 1`을 저장한다.
+6. power stage를 다시 disarm하고 boot reference를 다시 잡는다.
+
+예시:
+
+```bash
+# AS5600 방향 자동 판정
+cansend can0 277#01
+```
+
 ## Runtime Diagnostic
 
 - ID: `0x5F0 + node_id`
