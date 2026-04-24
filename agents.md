@@ -2257,3 +2257,35 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - add CAN-visible result/status for output encoder auto-calibration success/failure
   - expose FRAM erase/first-boot provisioning as an explicit manufacturing or service procedure document
+
+## 2026-04-25 - CAN spec test runner
+
+- Completed:
+  - added executable Python test runner [tools/can_spec_test.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_spec_test.py)
+  - the runner validates:
+    - CAN frame ID mapping for a selected `node_id`
+    - `int32` little-endian milli-unit payload encode/decode
+    - `candump -L` parsing
+    - runtime diagnostic, limits, and config status decoding
+    - host-side command payload validation
+    - live CAN status visibility
+    - disarm idempotency
+    - actuator limits config roundtrip with restore
+    - gear ratio config roundtrip with restore
+    - current profile command success while disarmed
+    - invalid profile command ignored
+  - added optional gated tests:
+    - `--allow-arm` for power-stage arm/disarm and armed-state rejection checks
+    - `--allow-motion` for small angle/velocity response checks
+  - documented usage in [docs/can_spec_test_runner.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_spec_test_runner.md)
+  - ran protocol-only test:
+    - `python3 tools/can_spec_test.py --protocol-only`
+    - result: `6/6` passed
+  - ran default live test against node `7` on `can0`:
+    - `python3 tools/can_spec_test.py --iface can0 --node-id 7 --report docs/can_spec_test_latest.json`
+    - result: `14/14` passed
+    - observed profile `As5600`, disarmed, limits `0 .. 2160 deg`, gear `8.000`
+- Next:
+  - add CAN-visible result/status for output encoder auto-calibration success/failure
+  - extend the spec runner after that change so it can assert AS5600 direction auto-calibration result codes directly
+  - expose output encoder config and auto-calibration in the web UI
