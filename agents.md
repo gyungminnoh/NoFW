@@ -2086,6 +2086,9 @@ When working on hardware-related tasks in this repo, prefer this order:
     - steering `S01..S04`, `As5600`, `50:1`, node ids `11..14`
     - driving `D01..D04`, `VelocityOnly`, `78:15`, node ids `21..24`
     - gripper `G01`, `As5600`, `30:1`, node id `31`
+  - updated deployment travel limits:
+    - steering boards: `-120 ~ 120 deg`
+    - gripper board: `0 ~ 90 deg`
 - Next:
   - replace the temporary board labels with final physical labels or serial numbers when available
-  - fill in final actuator travel limits for steering and gripper boards when the mechanism range is fixed
+  - document the gripper zero-setting workflow once the actual mechanical zero procedure is fixed

@@ -24,17 +24,17 @@
 
 ## 배포 테이블
 
-| board label | role | planned node_id | profile | control capability | gear ratio | output encoder policy | note |
+| board label | role | planned node_id | profile | control capability | gear ratio | travel limits (deg) | output encoder policy | note |
 |---|---|---:|---|---|---|---|---|
-| `S01` | steering front-left | `11` | `As5600` | angle + velocity | `50:1` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S02` | steering front-right | `12` | `As5600` | angle + velocity | `50:1` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S03` | steering rear-left | `13` | `As5600` | angle + velocity | `50:1` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S04` | steering rear-right | `14` | `As5600` | angle + velocity | `50:1` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `D01` | driving front-left | `21` | `VelocityOnly` | velocity only | `78:15` | no output absolute encoder required | driving group |
-| `D02` | driving front-right | `22` | `VelocityOnly` | velocity only | `78:15` | no output absolute encoder required | driving group |
-| `D03` | driving rear-left | `23` | `VelocityOnly` | velocity only | `78:15` | no output absolute encoder required | driving group |
-| `D04` | driving rear-right | `24` | `VelocityOnly` | velocity only | `78:15` | no output absolute encoder required | driving group |
-| `G01` | gripper | `31` | `As5600` | angle + velocity | `30:1` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
+| `S01` | steering front-left | `11` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S02` | steering front-right | `12` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S03` | steering rear-left | `13` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S04` | steering rear-right | `14` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `D01` | driving front-left | `21` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D02` | driving front-right | `22` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D03` | driving rear-left | `23` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D04` | driving rear-right | `24` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `G01` | gripper | `31` | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
 
 ## 적용 규칙
 
@@ -48,6 +48,10 @@
   - steering: `50.0`
   - driving: `78.0 / 15.0`에 해당하는 비율
   - gripper: `30.0`
+- output travel limits:
+  - steering: `output_min_deg = -120`, `output_max_deg = 120`
+  - driving: not used in `VelocityOnly`
+  - gripper: `output_min_deg = 0`, `output_max_deg = 90`
 
 주의:
 
@@ -71,5 +75,4 @@
 
 - 최종 물리 라벨 또는 시리얼 번호
 - 실제 장착 위치 이름
-- steering/gripper의 `output_min_deg`, `output_max_deg`
 - gripper의 실제 가동 범위와 초기 zero 기준 작업 절차
