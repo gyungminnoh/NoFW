@@ -133,6 +133,8 @@
 - power-stage cmd: `0x237`
 - actuator limits config cmd: `0x247`
 - actuator gear config cmd: `0x257`
+- output encoder config cmd: `0x267`
+- output encoder direction auto-cal cmd: `0x277`
 - runtime diag: `0x5F7`
 
 버스 조건:
@@ -195,9 +197,10 @@
 4. `0x437`를 읽어 gear ratio 확인
 5. 원하는 profile이 아니면 먼저 `0x237#00`으로 disarm하고 `0x227`로 변경 요청
 6. 다시 `0x5F7`를 읽어 active profile이 바뀌었는지 확인
-7. 필요한 경우에만 `0x237#01`로 arm
-8. 작은 command로 방향과 반응 확인
-9. 정상 확인 후 본 운전으로 들어감
+7. `As5600` profile에서 출력축 방향이 아직 검증되지 않은 보드라면 `0x277#01`로 방향 자동 캘리브레이션 실행
+8. 필요한 경우에만 `0x237#01`로 arm
+9. 작은 command로 방향과 반응 확인
+10. 정상 확인 후 본 운전으로 들어감
 
 권장 판정:
 
@@ -245,6 +248,10 @@ profile command:
 
 - `AS5600` 기반 boot zero/reference
 - angle/velocity 모두 가능
+- AS5600 zero offset과 방향 설정은 `FRAM`에 저장된다
+- AS5600 장착 방향이 출력축 좌표계와 반대이면 `invert`가 켜져 있어야 한다
+- 방향은 상위 제어기가 매번 알려줄 필요는 없고, 최초 세팅/정비 시 한 번 저장하면 된다
+- 방향 자동 판정은 `0x270 + node_id` 명령으로 수행한다
 
 #### `TmagLut`
 
@@ -282,6 +289,7 @@ power-stage command:
 - `output_min_deg/output_max_deg` 변경은 disarmed 상태에서만 허용된다
 - gear ratio 변경도 disarmed 상태에서만 허용된다
 - profile 변경도 disarmed 상태에서만 허용된다
+- output encoder 방향 설정과 방향 자동 캘리브레이션도 disarmed 상태에서만 허용된다
 - armed 상태에서 설정/profile 변경 프레임을 보내도 펌웨어는 적용하지 않는다
 - 상위 제어기는 설정 변경 전 반드시 `0x237#00`을 보내고 `0x5F7` armed bit가 `0`인지 확인해야 한다
 
@@ -430,6 +438,77 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 - `TmagLut` profile은 저장된 TMAG calibration의 learned gear ratio와 현재 gear ratio가 다르면 calibration required 상태로 간주된다
 - `DirectInput` profile은 `gear_ratio == 1.000`일 때만 유효하다
 
+### 10.3 AS5600 방향 수동 설정
+
+명령:
+
+- ID: `0x260 + node_id`
+- 기본 node `7`: `0x267`
+- payload:
+  - `data[0] = 1` for `As5600`
+  - `data[1] = invert`
+
+예:
+
+```bash
+# AS5600 raw direction 그대로 사용
+cansend can0 267#0100
+
+# AS5600 raw direction 반전
+cansend can0 267#0101
+```
+
+의미:
+
+- 저장된 AS5600 zero offset은 유지한다
+- AS5600 방향 플래그만 `FRAM`에 저장한다
+- 적용 후 펌웨어는 boot reference를 다시 잡는다
+- 이 값은 전원 재인가 후에도 유지되므로 매번 보낼 필요는 없다
+
+### 10.4 AS5600 방향 자동 캘리브레이션
+
+명령:
+
+- ID: `0x270 + node_id`
+- 기본 node `7`: `0x277`
+- payload:
+  - `data[0] = 1` for `As5600`
+
+예:
+
+```bash
+cansend can0 277#01
+```
+
+적용 조건:
+
+- power stage가 `disarmed` 상태여야 한다
+- 현재 profile이 `As5600`이어야 한다
+- 저장된 AS5600 zero calibration이 있어야 한다
+
+펌웨어 내부 동작:
+
+1. AS5600 raw angle을 읽는다
+2. 잠시 power stage를 arm한다
+3. 양의 출력축 방향으로 짧게 움직인다
+4. AS5600 raw angle을 다시 읽는다
+5. raw angle이 증가하면 `invert = 0`, 감소하면 `invert = 1`을 `FRAM`에 저장한다
+6. power stage를 다시 disarm하고 boot reference를 다시 잡는다
+
+상위 제어기 권장 절차:
+
+1. `0x237#00`으로 disarm
+2. `0x5F7`에서 armed bit가 `0`인지 확인
+3. `0x277#01` 전송
+4. `0x5F7`에서 다시 armed bit가 `0`으로 돌아왔는지 확인
+5. 작은 angle command 또는 0deg 복귀로 방향을 최종 확인
+
+주의:
+
+- 이 명령은 짧지만 실제 모터를 움직인다
+- 현재 펌웨어는 별도 성공/실패 ack frame을 보내지 않는다
+- 상위 제어기는 명령 후 `0x407`, `0x417`, `0x5F7`를 보고 움직임과 disarm 복귀를 확인해야 한다
+
 ## 11. 상위 제어기에서 권장하는 최소 통합 절차
 
 ### 11.1 연결 시
@@ -439,7 +518,8 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 3. `0x437`로 gear ratio 확인
 4. 원하는 profile과 calibration 상태 확인
 5. 필요하면 profile 변경
-6. 다시 `0x5F7`로 적용 확인
+6. `As5600` 보드가 처음 설치된 상태이면 `0x277#01`로 방향 자동 캘리브레이션
+7. 다시 `0x5F7`로 적용 확인
 
 ### 11.2 구동 시작 시
 
@@ -468,6 +548,7 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 - board power-on만으로 모터가 구동 가능하다고 가정하면 안 된다
 - 큰 angle command가 항상 그 값까지 도달한다고 가정하면 안 된다
 - profile command에 별도 ack가 온다고 가정하면 안 된다
+- output encoder 방향 자동 캘리브레이션에 별도 ack가 온다고 가정하면 안 된다
 
 ## 13. 통합 시 흔한 실패 원인
 
@@ -480,6 +561,21 @@ gear ratio는 출력축 각도와 입력축/motor 각도를 해석할 때 필요
 - `As5600ReadFailed`: AS5600 I2C/배선/자석 상태 문제
 - calibration 미완료
 - 현재 시스템이 `DirectInput` 조건이 아님
+
+### 0deg 복귀 방향이 반대로 보임
+
+원인 후보:
+
+- AS5600 `invert` 설정이 현재 장착 방향과 맞지 않음
+- AS5600 zero offset이 잘못 저장됨
+- `gear_ratio` 또는 `motor_to_output_sign` 설정이 실제 기구와 맞지 않음
+
+권장 대응:
+
+1. disarm 상태 확인
+2. `0x277#01`로 AS5600 방향 자동 캘리브레이션 실행
+3. 그래도 맞지 않으면 manual zero 절차로 AS5600 zero를 다시 저장
+4. 이후 작은 angle command로 방향 검증
 
 ### command를 보냈는데 멈춰 버림
 

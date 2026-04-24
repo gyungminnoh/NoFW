@@ -2203,3 +2203,18 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - add CAN-visible result/status for output encoder auto-calibration success/failure
   - expose the manual invert setting and auto-calibration command in the web UI
+
+## 2026-04-25 - Host controller guide update
+
+- Completed:
+  - identified the host/upper-layer document as [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+  - updated it with the latest output encoder direction behavior:
+    - CAN ID list now includes `0x267` output encoder config and `0x277` AS5600 direction auto-calibration
+    - boot procedure recommends `0x277#01` for first-time AS5600 board setup
+    - `As5600` profile section now states that zero offset and direction are stored in FRAM
+    - settings section documents manual invert commands `267#0100` / `267#0101`
+    - settings section documents auto-calibration command `277#01`
+    - troubleshooting section covers wrong 0deg return direction
+- Next:
+  - add CAN-visible result/status for output encoder auto-calibration success/failure
+  - expose output encoder config and auto-calibration in the web UI
