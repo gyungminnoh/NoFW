@@ -2081,6 +2081,11 @@ When working on hardware-related tasks in this repo, prefer this order:
     - restored final firmware `CAN_NODE_ID = 7`: board responded again on `0x407`, `0x417`, `0x5F7`
   - added [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)
     with a board labeling, build, upload, and CAN verification procedure for multi-board deployment
+  - added [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
+    for the planned 9-board deployment:
+    - steering `S01..S04`, `As5600`, `50:1`, node ids `11..14`
+    - driving `D01..D04`, `VelocityOnly`, `78:15`, node ids `21..24`
+    - gripper `G01`, `As5600`, `30:1`, node id `31`
 - Next:
-  - if board count grows, consider keeping a persistent deployment table
-    that maps physical board serial/label to assigned `CAN_NODE_ID`
+  - replace the temporary board labels with final physical labels or serial numbers when available
+  - fill in final actuator travel limits for steering and gripper boards when the mechanism range is fixed

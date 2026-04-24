@@ -11,6 +11,9 @@
 
 즉 보드별 `node_id`를 나누려면 보드별로 다른 `CAN_NODE_ID`로 빌드/업로드하면 된다.
 
+현재 계획된 `9`개 보드의 실제 배포 표는
+[board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)에 정리한다.
+
 ## 1. 배포 전 준비
 
 보드별 할당표를 먼저 정한다.
