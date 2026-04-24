@@ -47,9 +47,6 @@ static constexpr float ACTUATOR_OUTPUT_MAX_RAD = ACTUATOR_MOTOR_MAX_RAD / GEAR_R
 // Output angle range in degrees (output shaft reference).
 static constexpr float ACTUATOR_OUTPUT_MAX_DEG =
     ACTUATOR_OUTPUT_MAX_RAD * (180.0f / 3.1415926f);
-// Boot target output angle in degrees.
-static constexpr float ACTUATOR_BOOT_OUTPUT_DEG = 0.0f;
-
 // =================== CAN (CONFIRMED) ===================
 static constexpr uint32_t CAN_BITRATE    = 1000000; // 1 Mbps
 static constexpr uint32_t CAN_TIMEOUT_MS = 100;

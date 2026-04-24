@@ -33,8 +33,10 @@ def request_json(base_url: str, path: str, payload: dict[str, Any] | None = None
 
 
 class SmokeTest:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, can_iface: str, node_id: int):
         self.base_url = base_url.rstrip("/")
+        self.can_iface = can_iface
+        self.node_id = node_id
         self.results: list[tuple[str, bool, str]] = []
 
     def check(self, name: str, condition: bool, detail: str = "") -> None:
@@ -185,7 +187,7 @@ class SmokeTest:
         status, body = request_json(
             self.base_url,
             "/api/session",
-            {"can_iface": "can0", "node_id": 7},
+            {"can_iface": self.can_iface, "node_id": self.node_id},
         )
         self.check("valid same-session update succeeds", status == 200 and body.get("ok") is True)
 
@@ -249,7 +251,7 @@ def main() -> int:
                 stderr=subprocess.PIPE,
                 text=True,
             )
-        SmokeTest(base_url).run()
+        SmokeTest(base_url, args.can_iface, args.node_id).run()
     finally:
         if server is not None and server.poll() is None:
             server.terminate()

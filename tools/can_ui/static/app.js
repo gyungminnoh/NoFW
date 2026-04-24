@@ -187,7 +187,7 @@ function maybePopulateConfigInputs(state) {
   }
 }
 
-function updateProfileFeedback(diag, linkAlive) {
+function updateProfileFeedback(diag, linkAlive, diagCanId) {
   if (!pendingProfileRequest) {
     stateEls.profileFeedback.textContent = profileFeedback.text;
     stateEls.profileFeedback.className = `feedback ${profileFeedback.kind}`;
@@ -233,7 +233,7 @@ function updateProfileFeedback(diag, linkAlive) {
     pendingProfileRequest = null;
   } else if (!linkAlive) {
     profileFeedback = {
-      text: `Requested ${target}; waiting for live 0x5F7 status.`,
+      text: `Requested ${target}; waiting for live ${diagCanId} status.`,
       kind: "pending",
     };
   } else if (elapsedMs > 2500) {
@@ -369,6 +369,7 @@ function renderState(state) {
   const streamMode = state.stream.mode || null;
   const limits = state.limits || {};
   const config = state.config || {};
+  const diagCanId = `0x${(0x5F0 + state.session.node_id).toString(16).toUpperCase()}`;
   const targetState = angleTargetState(state);
   const currentState = currentRangeState(state);
   maybePopulateConfigInputs(state);
@@ -394,7 +395,7 @@ function renderState(state) {
   stateEls.currentRangeFeedback.textContent = currentState.message;
   stateEls.currentRangeFeedback.className = `feedback ${currentState.kind}`;
   updateActuatorConfigFeedback(state, linkAlive, armed);
-  updateProfileFeedback(diag, linkAlive);
+  updateProfileFeedback(diag, linkAlive, diagCanId);
   stateEls.storedProfile.textContent = diag.stored_profile || "-";
   stateEls.activeProfile.textContent = diag.active_profile || "-";
   stateEls.defaultMode.textContent = diag.default_control_mode || "-";
@@ -504,7 +505,7 @@ function renderState(state) {
         : armed
           ? "Disarm before changing profile"
           : isPending
-            ? "Waiting for 0x5F7 to confirm this profile"
+            ? `Waiting for ${diagCanId} to confirm this profile`
             : "Already the active profile"
     );
   }

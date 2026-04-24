@@ -2094,6 +2094,19 @@ When working on hardware-related tasks in this repo, prefer this order:
     - driving: `FL=18`, `FR=19`, `BL=20`, `BR=17`
     - documented the corresponding command/status CAN IDs in
       [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
+  - audited deployment-related code and removed/fixed stale paths:
+    - removed unused `ACTUATOR_BOOT_OUTPUT_DEG`
+    - fixed `tools/can_ui/smoke_test.py` so it no longer hardcodes `node_id = 7`
+    - fixed `tools/can_ui/static/app.js` so profile-wait text uses the active session diag CAN ID instead of hardcoded `0x5F7`
+  - representative live hardware validation completed on the connected board:
+    - steering representative: `node_id = 2`, `As5600`, `50:1`, `-120 ~ 120 deg`
+    - driving representative: `node_id = 18`, `VelocityOnly`, `78:15`
+    - gripper representative: `node_id = 31`, `As5600`, `30:1`, `0 ~ 90 deg`
+    - gripper out-of-range recovery behavior was checked and matched the intended inward-only recovery logic
+  - restored the connected board to the development default after testing:
+    - `node_id = 7`, `As5600`, `gear_ratio = 8.0`, `limits = -1080 ~ 1080 deg`
+  - wrote [docs/deployment_validation_report_2026-04-25.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/deployment_validation_report_2026-04-25.md)
+    with the live test results and restored final state
 - Next:
   - replace the temporary board labels with final physical labels or serial numbers when available
   - document the gripper zero-setting workflow once the actual mechanical zero procedure is fixed
