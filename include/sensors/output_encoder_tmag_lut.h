@@ -15,6 +15,7 @@ class OutputEncoderTmagLut : public IOutputEncoder {
   bool isCalibrated() const override;
   bool read(OutputAngleSample& out) override;
   bool readAbsoluteAngleRad(float& out_angle_rad) override;
+  bool readZeroRelativeAngleRad(float& out_angle_rad) override;
 
   void setInputSensor(Sensor* input_sensor);
   void setCalibration(const TmagCalibrationData& calibration);

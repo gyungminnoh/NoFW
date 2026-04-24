@@ -131,6 +131,7 @@ bool hasRequiredMotionCalibration(const ConfigStore::CalibrationBundle& bundle,
 }
 
 bool readOutputEncoderAbsolute(float& out_angle_rad);
+bool readOutputEncoderZeroRelative(float& out_angle_rad);
 
 bool validTravelLimits(float output_min_deg, float output_max_deg) {
   return isfinite(output_min_deg) && isfinite(output_max_deg) &&
@@ -262,11 +263,11 @@ void refreshBootReference() {
   const float raw = sensor.getAngle();
   mt.reset(raw);
 
-  float output_boot_rad = 0.0f;
+  float output_boot_delta_rad = 0.0f;
   const bool have_output_boot_reference =
-      outputEncoderRequired(actuator_config) && readOutputEncoderAbsolute(output_boot_rad);
+      outputEncoderRequired(actuator_config) && readOutputEncoderZeroRelative(output_boot_delta_rad);
   if (have_output_boot_reference) {
-    ActuatorAPI::setBootReference(mt.mt_angle, output_boot_rad);
+    ActuatorAPI::setBootReferenceFromOutputDelta(mt.mt_angle, output_boot_delta_rad);
   } else {
     ActuatorAPI::setBootReferenceFromMotor(mt.mt_angle);
   }
@@ -334,6 +335,30 @@ bool applyActuatorGearConfig(float gear_ratio, float current_motor_mt_rad) {
 
   actuator_config = next_config;
   if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    return false;
+  }
+
+  reconfigureRuntimeAfterActuatorConfigChange(current_motor_mt_rad, true);
+  return true;
+}
+
+bool applyOutputEncoderConfig(OutputEncoderType encoder_type,
+                              bool invert,
+                              float current_motor_mt_rad) {
+  if (g_power_stage_armed || encoder_type != OutputEncoderType::As5600) {
+    return false;
+  }
+
+  ConfigStore::CalibrationBundle calibration_bundle = {};
+  ConfigStore::loadCalibrationBundleCompat(calibration_bundle);
+  if (!calibration_bundle.as5600.valid) {
+    return false;
+  }
+
+  calibration_bundle.as5600.magic = kCalibrationRecordMagic;
+  calibration_bundle.as5600.invert = invert;
+  calibration_bundle.as5600.valid = true;
+  if (!ConfigStore::saveCalibrationBundleCompat(calibration_bundle)) {
     return false;
   }
 
@@ -420,6 +445,10 @@ void configureOutputEncoder(const ConfigStore::CalibrationBundle& bundle) {
 
 bool readOutputEncoderAbsolute(float& out_angle_rad) {
   return output_encoder_manager.readAbsoluteAngleRad(out_angle_rad);
+}
+
+bool readOutputEncoderZeroRelative(float& out_angle_rad) {
+  return output_encoder_manager.readZeroRelativeAngleRad(out_angle_rad);
 }
 
 void updateOutputEncoderZeroOffset(float zero_rad) {
@@ -789,6 +818,14 @@ void loop() {
       return;
     }
 
+    OutputEncoderType requested_encoder_type = OutputEncoderType::As5600;
+    bool requested_encoder_invert = false;
+    if (CanService::takePendingOutputEncoderConfig(
+            requested_encoder_type, requested_encoder_invert)) {
+      applyOutputEncoderConfig(requested_encoder_type, requested_encoder_invert, pos_mt);
+      return;
+    }
+
     bool power_stage_enable = false;
     if (CanService::takePendingPowerStageEnable(power_stage_enable) && power_stage_enable) {
       armPowerStage();
@@ -939,6 +976,13 @@ void loop() {
 
   float requested_gear_ratio = 1.0f;
   if (CanService::takePendingActuatorGearConfig(requested_gear_ratio)) {
+    // Travel/config changes are intentionally ignored while armed.
+  }
+
+  OutputEncoderType requested_encoder_type = OutputEncoderType::As5600;
+  bool requested_encoder_invert = false;
+  if (CanService::takePendingOutputEncoderConfig(
+          requested_encoder_type, requested_encoder_invert)) {
     // Travel/config changes are intentionally ignored while armed.
   }
 

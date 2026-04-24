@@ -307,6 +307,35 @@ cansend can0 257#401F0000
 
 적용 후에는 `0x437`에서 저장/적용된 gear ratio를 확인한다.
 
+## Output Encoder Config Command
+
+- ID: `0x260 + node_id`
+- 기본 node `7`이면 `0x267`
+- DLC: `2`
+- 의미: 출력축 엔코더의 장착 방향 설정을 `FRAM`에 저장하고 출력축 기준을 재초기화
+- 적용 조건: power stage가 `disarmed` 상태일 때만 적용
+
+Payload:
+
+- `data[0] = output_encoder_type`
+  - `1` = `As5600`
+- `data[1] = invert`
+  - `0` = AS5600 raw direction 그대로 사용
+  - `1` = AS5600 raw direction 반전
+
+AS5600 장착 방향이 출력축 좌표계와 반대이면 `invert = 1`로 저장해야 한다.
+이 명령은 저장된 AS5600 zero offset은 유지하고 방향만 바꾼다.
+
+예시:
+
+```bash
+# AS5600 invert off
+cansend can0 267#0100
+
+# AS5600 invert on
+cansend can0 267#0101
+```
+
 ## Runtime Diagnostic
 
 - ID: `0x5F0 + node_id`

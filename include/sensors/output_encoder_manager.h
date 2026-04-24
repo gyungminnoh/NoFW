@@ -20,6 +20,7 @@ class OutputEncoderManager {
   IOutputEncoder* active();
   const IOutputEncoder* active() const;
   bool readAbsoluteAngleRad(float& out_angle_rad) const;
+  bool readZeroRelativeAngleRad(float& out_angle_rad) const;
   void updateZeroOffset(float zero_rad, uint32_t magic);
   const DirectInputCalibrationData& directInputCalibration() const;
   const As5600CalibrationData& as5600Calibration() const;

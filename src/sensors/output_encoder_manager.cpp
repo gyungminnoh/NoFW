@@ -93,6 +93,13 @@ bool OutputEncoderManager::readAbsoluteAngleRad(float& out_angle_rad) const {
   return active_encoder_->readAbsoluteAngleRad(out_angle_rad);
 }
 
+bool OutputEncoderManager::readZeroRelativeAngleRad(float& out_angle_rad) const {
+  if (active_encoder_ == nullptr) {
+    return false;
+  }
+  return active_encoder_->readZeroRelativeAngleRad(out_angle_rad);
+}
+
 void OutputEncoderManager::updateZeroOffset(float zero_rad, uint32_t magic) {
   if (active_encoder_ == nullptr) {
     return;

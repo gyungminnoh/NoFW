@@ -2150,3 +2150,29 @@ When working on hardware-related tasks in this repo, prefer this order:
 - Next:
   - if the first-arm homing motion feels too fast or abrupt on the real mechanism, add a dedicated boot-homing velocity cap or explicit home command
   - otherwise keep this behavior as the default absolute-output-reference boot behavior
+
+## 2026-04-25 - AS5600 boot-zero direction fix
+
+- Completed:
+  - identified that boot output-zero reference used raw AS5600 absolute angle and ignored `As5600CalibrationData::invert`
+  - added zero-relative output encoder reads so boot reference uses the encoder-calibrated signed delta from stored zero
+  - changed AS5600 zero-relative reads to apply the stored `invert` flag before boot/reference math
+  - fixed the TMAG LUT output encoder read path so its already-zero-relative estimator output is not offset a second time
+  - added CAN output-encoder config command:
+    - `0x260 + node_id`
+    - for node `7`: `0x267`
+    - `267#0100` = AS5600 invert off
+    - `267#0101` = AS5600 invert on
+    - accepted only while disarmed
+  - documented the new command in [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+  - built and uploaded `custom_f446re`
+  - set current board AS5600 invert on with `cansend can0 267#0101`
+  - live validation:
+    - before invert, current interpreted position was about `-59.6 deg`
+    - after invert, current interpreted position became about `+59.6 deg`
+    - arm moved from about `+59.6 deg` down toward `0 deg`
+    - final position settled near `0.03 ~ 0.06 deg`
+    - disarmed successfully, final `0x5F7 = FB 01 01 01 01 01 00 01`
+- Next:
+  - expose AS5600 invert in the web UI so users do not have to send raw CAN frames
+  - add output encoder config status reporting if upper controllers need to read back the stored invert flag

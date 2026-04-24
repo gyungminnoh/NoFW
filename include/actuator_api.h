@@ -17,6 +17,7 @@ extern float output_raw_boot_rad;
 extern float output_zero_ref_rad;
 
 void setBootReference(float motor_mt_now_rad, float output_boot_rad);
+void setBootReferenceFromOutputDelta(float motor_mt_now_rad, float output_delta_rad);
 void setBootReferenceFromMotor(float motor_mt_now_rad);
 
 float getTargetOutputAbsRad();
@@ -32,4 +33,3 @@ float outputVelocityDegPerSecToMotorVelocity(float velocity_deg_s);
 float motorVelocityToOutputVelocityDegPerSec(float motor_velocity_rad_s);
 
 }  // namespace ActuatorAPI
-

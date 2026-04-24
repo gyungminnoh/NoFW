@@ -12,6 +12,7 @@ class OutputEncoderAs5600 : public IOutputEncoder {
   bool isCalibrated() const override;
   bool read(OutputAngleSample& out) override;
   bool readAbsoluteAngleRad(float& out_angle_rad) override;
+  bool readZeroRelativeAngleRad(float& out_angle_rad) override;
 
   void setCalibration(const As5600CalibrationData& calibration);
   const As5600CalibrationData& calibration() const;

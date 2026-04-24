@@ -21,6 +21,9 @@ static float g_pending_output_min_deg = 0.0f;
 static float g_pending_output_max_deg = 0.0f;
 static bool g_has_pending_actuator_gear_config = false;
 static float g_pending_gear_ratio = 1.0f;
+static bool g_has_pending_output_encoder_config = false;
+static OutputEncoderType g_pending_output_encoder_type = OutputEncoderType::As5600;
+static bool g_pending_output_encoder_invert = false;
 static float g_last_pos_mt_rad = 0.0f;
 static uint32_t g_last_pos_sample_ms = 0;
 
@@ -44,6 +47,7 @@ bool init(const ActuatorConfig& actuator_config) {
   g_has_pending_power_stage_enable = false;
   g_has_pending_actuator_limits_config = false;
   g_has_pending_actuator_gear_config = false;
+  g_has_pending_output_encoder_config = false;
   g_last_pos_mt_rad = 0.0f;
   g_last_pos_sample_ms = 0;
   return ok;
@@ -123,6 +127,19 @@ void poll(float current_motor_mt_rad) {
       }
       g_pending_gear_ratio = gear_ratio;
       g_has_pending_actuator_gear_config = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::outputEncoderConfigCmdCanId(g_can_node_id)) {
+      OutputEncoderType encoder_type = OutputEncoderType::As5600;
+      bool invert = false;
+      if (!CanProtocol::decodeOutputEncoderConfigCmd_OptionA(
+              f.data, f.dlc, encoder_type, invert)) {
+        continue;
+      }
+      g_pending_output_encoder_type = encoder_type;
+      g_pending_output_encoder_invert = invert;
+      g_has_pending_output_encoder_config = true;
     }
   }
 
@@ -216,6 +233,17 @@ bool takePendingActuatorGearConfig(float& out_gear_ratio) {
   }
   out_gear_ratio = g_pending_gear_ratio;
   g_has_pending_actuator_gear_config = false;
+  return true;
+}
+
+bool takePendingOutputEncoderConfig(OutputEncoderType& out_encoder_type,
+                                    bool& out_invert) {
+  if (!g_has_pending_output_encoder_config) {
+    return false;
+  }
+  out_encoder_type = g_pending_output_encoder_type;
+  out_invert = g_pending_output_encoder_invert;
+  g_has_pending_output_encoder_config = false;
   return true;
 }
 

@@ -44,6 +44,10 @@ uint16_t actuatorGearConfigCmdCanId(uint8_t node_id) {
   return CAN_ID_ACTUATOR_GEAR_CONFIG_CMD_BASE + node_id;
 }
 
+uint16_t outputEncoderConfigCmdCanId(uint8_t node_id) {
+  return CAN_ID_OUTPUT_ENCODER_CONFIG_CMD_BASE + node_id;
+}
+
 namespace {
 
 bool decodeInt32MUnits_(const uint8_t data[8], uint8_t len, float& out_value) {
@@ -194,6 +198,23 @@ bool decodePowerStageCmd_OptionA(const uint8_t data[8],
   if (len < 1) return false;
   if (data[0] > 1) return false;
   out_enable = (data[0] != 0);
+  return true;
+}
+
+bool decodeOutputEncoderConfigCmd_OptionA(const uint8_t data[8],
+                                          uint8_t len,
+                                          OutputEncoderType& out_encoder_type,
+                                          bool& out_invert) {
+  if (len < 2) return false;
+  const auto encoder_type = static_cast<OutputEncoderType>(data[0]);
+  if (encoder_type != OutputEncoderType::As5600) {
+    return false;
+  }
+  if (data[1] > 1) {
+    return false;
+  }
+  out_encoder_type = encoder_type;
+  out_invert = (data[1] != 0);
   return true;
 }
 

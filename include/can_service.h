@@ -13,4 +13,6 @@ namespace CanService {
   bool takePendingActuatorLimitsConfig(float& out_output_min_deg,
                                        float& out_output_max_deg);
   bool takePendingActuatorGearConfig(float& out_gear_ratio);
+  bool takePendingOutputEncoderConfig(OutputEncoderType& out_encoder_type,
+                                      bool& out_invert);
 }

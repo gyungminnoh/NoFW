@@ -74,9 +74,15 @@ void configure(const ActuatorConfig& actuator_config) {
 
 void setBootReference(float motor_mt_now_rad, float output_boot_rad) {
   const float delta = wrapToPi_(output_boot_rad - output_zero_ref_rad);
+  setBootReferenceFromOutputDelta(motor_mt_now_rad, delta);
+  output_raw_boot_rad = output_boot_rad;
+}
+
+void setBootReferenceFromOutputDelta(float motor_mt_now_rad, float output_delta_rad) {
+  const float delta = wrapToPi_(output_delta_rad);
   motor_zero_mt_rad =
       motor_mt_now_rad - (delta * static_cast<float>(motor_to_output_sign_) * gear_ratio_);
-  output_raw_boot_rad = output_boot_rad;
+  output_raw_boot_rad = delta;
 }
 
 void setBootReferenceFromMotor(float motor_mt_now_rad) {

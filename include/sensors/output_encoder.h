@@ -26,4 +26,5 @@ class IOutputEncoder {
   virtual bool isCalibrated() const = 0;
   virtual bool read(OutputAngleSample& out) = 0;
   virtual bool readAbsoluteAngleRad(float& out_angle_rad) = 0;
+  virtual bool readZeroRelativeAngleRad(float& out_angle_rad) = 0;
 };
