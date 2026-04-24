@@ -2079,6 +2079,8 @@ When working on hardware-related tasks in this repo, prefer this order:
     - before test: board responded on `0x407`, `0x417`, `0x5F7`
     - with temporary firmware `CAN_NODE_ID = 8`: board responded on `0x408`, `0x418`, `0x5F8`
     - restored final firmware `CAN_NODE_ID = 7`: board responded again on `0x407`, `0x417`, `0x5F7`
+  - added [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)
+    with a board labeling, build, upload, and CAN verification procedure for multi-board deployment
 - Next:
-  - if multiple boards will be provisioned regularly, add a short manufacturing/deployment note
-    that maps each board to its dedicated firmware `CAN_NODE_ID`
+  - if board count grows, consider keeping a persistent deployment table
+    that maps physical board serial/label to assigned `CAN_NODE_ID`

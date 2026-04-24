@@ -175,6 +175,7 @@ candump can0,5F7:7FF
   현재 펌웨어의 `CAN_NODE_ID`와 다르면 FRAM 값을 펌웨어 값으로 덮어쓴다.
 - 즉 현재 빌드에 포함된 `CAN_NODE_ID`가 최종적으로 우선한다.
 - 여러 보드에 서로 다른 ID를 쓰려면 보드별로 다른 `CAN_NODE_ID`로 빌드/업로드하면 된다.
+- 반복 배포 절차는 [can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)를 따른다.
 
 즉 이 상태는:
 

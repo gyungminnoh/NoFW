@@ -144,6 +144,7 @@
 - 부팅 시 펌웨어는 FRAM에 저장된 `can_node_id`를 검사하고,
   값이 현재 빌드의 `CAN_NODE_ID`와 다르면 FRAM 값을 펌웨어 값으로 갱신한다.
 - 따라서 상위 제어기는 "현재 설치된 펌웨어 빌드의 node_id가 최종적으로 적용된다"는 전제로 운용해야 한다.
+- 여러 보드 배포 절차는 [can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)를 참고한다.
 
 ## 4. 상위 제어기 상태기계에서 꼭 가져가야 하는 개념
 
