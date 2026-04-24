@@ -2089,6 +2089,11 @@ When working on hardware-related tasks in this repo, prefer this order:
   - updated deployment travel limits:
     - steering boards: `-120 ~ 120 deg`
     - gripper board: `0 ~ 90 deg`
+  - updated the planned wheel-position CAN assignment:
+    - steering: `FL=2`, `FR=3`, `BL=4`, `BR=1`
+    - driving: `FL=18`, `FR=19`, `BL=20`, `BR=17`
+    - documented the corresponding command/status CAN IDs in
+      [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
 - Next:
   - replace the temporary board labels with final physical labels or serial numbers when available
   - document the gripper zero-setting workflow once the actual mechanical zero procedure is fixed

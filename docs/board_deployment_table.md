@@ -14,27 +14,28 @@
 - driving: `D01` ~ `D04`
 - gripper: `G01`
 
-`node_id`는 역할별로 구간을 나눠 배정했다.
+wheel 위치 표기는 다음을 기준으로 한다.
 
-- steering: `11` ~ `14`
-- driving: `21` ~ `24`
-- gripper: `31`
+- `FL` = `FrontLeft`
+- `FR` = `FrontRight`
+- `BL` = `BackLeft`
+- `BR` = `BackRight`
 
-이렇게 하면 `candump`만 봐도 어떤 계열 보드인지 구분하기 쉽다.
+기존에 `rear-left`, `rear-right`라고 부르던 위치는 이 문서에서 각각 `BL`, `BR`로 통일한다.
 
 ## 배포 테이블
 
-| board label | role | planned node_id | profile | control capability | gear ratio | travel limits (deg) | output encoder policy | note |
-|---|---|---:|---|---|---|---|---|
-| `S01` | steering front-left | `11` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S02` | steering front-right | `12` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S03` | steering rear-left | `13` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S04` | steering rear-right | `14` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `D01` | driving front-left | `21` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D02` | driving front-right | `22` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D03` | driving rear-left | `23` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D04` | driving rear-right | `24` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `G01` | gripper | `31` | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
+| board label | wheel pos | role | planned node_id | primary CAN ids | profile | control capability | gear ratio | travel limits (deg) | output encoder policy | note |
+|---|---|---|---:|---|---|---|---|---|---|---|
+| `S01` | `FL` | steering front-left | `2` | angle cmd `0x202`, angle status `0x402` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S02` | `FR` | steering front-right | `3` | angle cmd `0x203`, angle status `0x403` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S03` | `BL` | steering back-left | `4` | angle cmd `0x204`, angle status `0x404` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S04` | `BR` | steering back-right | `1` | angle cmd `0x201`, angle status `0x401` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `D01` | `FL` | driving front-left | `18` | velocity cmd `0x212`, velocity status `0x412` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D02` | `FR` | driving front-right | `19` | velocity cmd `0x213`, velocity status `0x413` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D03` | `BL` | driving back-left | `20` | velocity cmd `0x214`, velocity status `0x414` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D04` | `BR` | driving back-right | `17` | velocity cmd `0x211`, velocity status `0x411` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `G01` | `-` | gripper | `31` | angle cmd `0x21F`, angle status `0x41F` | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
 
 ## 적용 규칙
 
