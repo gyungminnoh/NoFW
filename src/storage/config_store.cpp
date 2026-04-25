@@ -1,7 +1,10 @@
 #include "storage/config_store.h"
 
+#include <math.h>
+#include <stddef.h>
 #include <string.h>
 
+#include "board_config.h"
 #include "config/calibration_constants.h"
 #include "fm25cl64b_fram.h"
 
@@ -9,30 +12,11 @@ namespace {
 
 constexpr uint32_t kActuatorConfigMagic = 0x41434647UL;   // "ACFG"
 constexpr uint32_t kCalibrationMagic = 0x43424C42UL;      // "CBLB"
-constexpr uint16_t kLegacyCalibrationAddr = 0x0000;
 constexpr uint16_t kActuatorConfigAddr = 0x0100;
-constexpr uint16_t kCalibrationAddr = 0x0200;
+constexpr uint16_t kCalibrationSlotAAddr = 0x0200;
+constexpr uint16_t kCalibrationSlotBAddr = 0x1200;
 constexpr uint16_t kStoreVersion = 2;
-constexpr float kDegPerRad = 180.0f / 3.1415926f;
-
-struct ActuatorConfigV1 {
-  uint32_t version = 1;
-  OutputEncoderType output_encoder_type = OutputEncoderType::As5600;
-  ControlMode default_control_mode = ControlMode::OutputAngle;
-  float gear_ratio = 1.0f;
-  int8_t motor_to_output_sign = 1;
-  float output_min_rad = 0.0f;
-  float output_max_rad = 0.0f;
-  bool enable_velocity_mode = true;
-  bool enable_output_angle_mode = true;
-  uint8_t can_node_id = 7;
-};
-
-struct CalibrationBundleV1 {
-  FocCalibrationData foc = {};
-  As5600CalibrationData as5600 = {};
-  TmagCalibrationData tmag = {};
-};
+constexpr uint32_t kCalibrationCommitMagic = 0x434F4D54UL;  // "COMT"
 
 struct StoredActuatorConfig {
   uint32_t magic = 0;
@@ -41,63 +25,134 @@ struct StoredActuatorConfig {
   ActuatorConfig config = {};
 };
 
-struct StoredCalibrationBundle {
+struct StoredCalibrationBundleSlot {
   uint32_t magic = 0;
   uint16_t version = 0;
   uint16_t reserved = 0;
+  uint32_t sequence = 0;
+  uint32_t crc32 = 0;
+  uint32_t committed = 0;
   ConfigStore::CalibrationBundle bundle = {};
 };
 
-struct StoredActuatorConfigV1 {
-  uint32_t magic = 0;
-  uint16_t version = 0;
-  uint16_t reserved = 0;
-  ActuatorConfigV1 config = {};
-};
-
-struct StoredCalibrationBundleV1 {
-  uint32_t magic = 0;
-  uint16_t version = 0;
-  uint16_t reserved = 0;
-  CalibrationBundleV1 bundle = {};
-};
-
-struct LegacyCalibrationRecord {
-  uint32_t magic = 0;
-  int8_t sensor_dir = 1;
-  float zero_elec = 0.0f;
-  float as5600_zero_ref = 0.0f;
-};
-
-bool loadLegacyCalibrationRecord(LegacyCalibrationRecord& out_record) {
-  if (!FM25CL64B::readObject(kLegacyCalibrationAddr, out_record)) {
-    return false;
+uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
+  crc = ~crc;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      const uint32_t mask = static_cast<uint32_t>(-(static_cast<int32_t>(crc & 1u)));
+      crc = (crc >> 1) ^ (0xEDB88320u & mask);
+    }
   }
-  if (out_record.magic != kCalibrationRecordMagic) {
-    return false;
-  }
-  if (out_record.sensor_dir != 1 && out_record.sensor_dir != -1) {
-    return false;
-  }
-  return true;
+  return ~crc;
 }
 
-void saveLegacyCalibrationRecord(const ConfigStore::CalibrationBundle& bundle) {
-  if (!bundle.foc.valid || !bundle.as5600.valid) {
-    return;
-  }
-
-  LegacyCalibrationRecord legacy = {};
-  legacy.magic = kCalibrationRecordMagic;
-  legacy.sensor_dir = bundle.foc.sensor_direction;
-  legacy.zero_elec = bundle.foc.zero_electrical_angle;
-  legacy.as5600_zero_ref = bundle.as5600.zero_offset_rad;
-  FM25CL64B::writeObject(kLegacyCalibrationAddr, legacy);
+uint32_t calibrationBundleCrc32(uint32_t sequence, const ConfigStore::CalibrationBundle& bundle) {
+  uint32_t crc = 0;
+  crc = crc32Update(crc, reinterpret_cast<const uint8_t*>(&sequence), sizeof(sequence));
+  crc = crc32Update(crc, reinterpret_cast<const uint8_t*>(&bundle), sizeof(bundle));
+  return crc;
 }
 
-void clearLegacyCalibrationRecord() {
-  const uint32_t empty_magic = 0;
-  FM25CL64B::writeObject(kLegacyCalibrationAddr, empty_magic);
+bool isFiniteFloat(float value) {
+  return isfinite(value);
+}
+
+bool sanitizeCalibrationBundle(ConfigStore::CalibrationBundle& bundle) {
+  bool any_valid = false;
+
+  const bool foc_valid =
+      bundle.foc.valid && bundle.foc.magic == kCalibrationRecordMagic &&
+      (bundle.foc.sensor_direction == 1 || bundle.foc.sensor_direction == -1) &&
+      isFiniteFloat(bundle.foc.zero_electrical_angle);
+  if (!foc_valid) {
+    bundle.foc = {};
+  } else {
+    any_valid = true;
+  }
+
+  const bool direct_input_valid =
+      bundle.direct_input.valid && bundle.direct_input.magic == kCalibrationRecordMagic &&
+      isFiniteFloat(bundle.direct_input.zero_offset_rad);
+  if (!direct_input_valid) {
+    bundle.direct_input = {};
+  } else {
+    any_valid = true;
+  }
+
+  const bool as5600_valid =
+      bundle.as5600.valid && bundle.as5600.magic == kCalibrationRecordMagic &&
+      isFiniteFloat(bundle.as5600.zero_offset_rad);
+  if (!as5600_valid) {
+    bundle.as5600 = {};
+  } else {
+    any_valid = true;
+  }
+
+  const bool tmag_valid =
+      bundle.tmag.valid && bundle.tmag.magic == kCalibrationRecordMagic &&
+      isFiniteFloat(bundle.tmag.zero_offset_rad) &&
+      isFiniteFloat(bundle.tmag.learned_gear_ratio) &&
+      isFiniteFloat(bundle.tmag.input_phase_rad) &&
+      isFiniteFloat(bundle.tmag.amp_x) &&
+      isFiniteFloat(bundle.tmag.amp_y) &&
+      isFiniteFloat(bundle.tmag.amp_z) &&
+      isFiniteFloat(bundle.tmag.calibration_rms_rad) &&
+      isFiniteFloat(bundle.tmag.validation_rms_rad) &&
+      (bundle.tmag.input_sign == 1 || bundle.tmag.input_sign == -1) &&
+      bundle.tmag.lut_bin_count > 0 && bundle.tmag.lut_bin_count <= kTmagLutBins &&
+      bundle.tmag.valid_bin_count <= bundle.tmag.lut_bin_count;
+  if (!tmag_valid) {
+    bundle.tmag = {};
+  } else {
+    any_valid = true;
+  }
+
+  return any_valid;
+}
+
+bool readCalibrationSlot(uint16_t address, StoredCalibrationBundleSlot& out_slot) {
+  if (!FM25CL64B::readObject(address, out_slot)) {
+    return false;
+  }
+  if (out_slot.magic != kCalibrationMagic || out_slot.version != kStoreVersion) {
+    return false;
+  }
+  if (out_slot.committed != kCalibrationCommitMagic) {
+    return false;
+  }
+  const uint32_t expected_crc = calibrationBundleCrc32(out_slot.sequence, out_slot.bundle);
+  if (out_slot.crc32 != expected_crc) {
+    return false;
+  }
+  return sanitizeCalibrationBundle(out_slot.bundle);
+}
+
+bool loadCalibrationBundleWithStatus_(ConfigStore::CalibrationBundle& out_bundle,
+                                      ConfigStore::CalibrationLoadStatus& out_status) {
+  out_status = ConfigStore::CalibrationLoadStatus::None;
+
+  StoredCalibrationBundleSlot slot_a = {};
+  const bool slot_a_ok = readCalibrationSlot(kCalibrationSlotAAddr, slot_a);
+  StoredCalibrationBundleSlot slot_b = {};
+  const bool slot_b_ok = readCalibrationSlot(kCalibrationSlotBAddr, slot_b);
+
+  if (slot_a_ok && slot_b_ok) {
+    out_bundle = (slot_b.sequence >= slot_a.sequence) ? slot_b.bundle : slot_a.bundle;
+    out_status = ConfigStore::CalibrationLoadStatus::Trusted;
+    return true;
+  }
+  if (slot_a_ok) {
+    out_bundle = slot_a.bundle;
+    out_status = ConfigStore::CalibrationLoadStatus::Trusted;
+    return true;
+  }
+  if (slot_b_ok) {
+    out_bundle = slot_b.bundle;
+    out_status = ConfigStore::CalibrationLoadStatus::Trusted;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -111,29 +166,12 @@ bool loadActuatorConfig(ActuatorConfig& out_config) {
   }
   if (stored.magic == kActuatorConfigMagic && stored.version == kStoreVersion) {
     out_config = stored.config;
+    // CAN node identity is deployment/build-time data, not a persisted runtime
+    // setting. Always take it from the currently flashed firmware.
+    out_config.can_node_id = CAN_NODE_ID;
     return true;
   }
-
-  StoredActuatorConfigV1 legacy = {};
-  if (!FM25CL64B::readObject(kActuatorConfigAddr, legacy)) {
-    return false;
-  }
-  if (legacy.magic != kActuatorConfigMagic || legacy.version != 1) {
-    return false;
-  }
-
-  out_config = {};
-  out_config.version = 2;
-  out_config.output_encoder_type = legacy.config.output_encoder_type;
-  out_config.default_control_mode = legacy.config.default_control_mode;
-  out_config.gear_ratio = legacy.config.gear_ratio;
-  out_config.motor_to_output_sign = legacy.config.motor_to_output_sign;
-  out_config.output_min_deg = legacy.config.output_min_rad * kDegPerRad;
-  out_config.output_max_deg = legacy.config.output_max_rad * kDegPerRad;
-  out_config.enable_velocity_mode = legacy.config.enable_velocity_mode;
-  out_config.enable_output_angle_mode = legacy.config.enable_output_angle_mode;
-  out_config.can_node_id = legacy.config.can_node_id;
-  return true;
+  return false;
 }
 
 bool saveActuatorConfig(const ActuatorConfig& config) {
@@ -141,82 +179,66 @@ bool saveActuatorConfig(const ActuatorConfig& config) {
   stored.magic = kActuatorConfigMagic;
   stored.version = kStoreVersion;
   stored.config = config;
+  // Persist the firmware-defined node ID so stored snapshots remain aligned
+  // with the flashed build, but never treat FRAM as the source of truth.
+  stored.config.can_node_id = CAN_NODE_ID;
   return FM25CL64B::writeObject(kActuatorConfigAddr, stored);
 }
 
 bool loadCalibrationBundle(CalibrationBundle& out_bundle) {
-  StoredCalibrationBundle stored = {};
-  if (!FM25CL64B::readObject(kCalibrationAddr, stored)) {
-    return false;
-  }
-  if (stored.magic == kCalibrationMagic && stored.version == kStoreVersion) {
-    out_bundle = stored.bundle;
-    return true;
-  }
+  CalibrationLoadStatus status = CalibrationLoadStatus::None;
+  return loadCalibrationBundleWithStatus_(out_bundle, status);
+}
 
-  StoredCalibrationBundleV1 legacy = {};
-  if (!FM25CL64B::readObject(kCalibrationAddr, legacy)) {
-    return false;
-  }
-  if (legacy.magic != kCalibrationMagic || legacy.version != 1) {
-    return false;
-  }
-
-  out_bundle = {};
-  out_bundle.foc = legacy.bundle.foc;
-  out_bundle.as5600 = legacy.bundle.as5600;
-  out_bundle.tmag = legacy.bundle.tmag;
-  return true;
+bool loadCalibrationBundleWithStatus(CalibrationBundle& out_bundle,
+                                     CalibrationLoadStatus& out_status) {
+  return loadCalibrationBundleWithStatus_(out_bundle, out_status);
 }
 
 bool saveCalibrationBundle(const CalibrationBundle& bundle) {
-  StoredCalibrationBundle stored = {};
+  CalibrationBundle stored_bundle = bundle;
+  if (!sanitizeCalibrationBundle(stored_bundle)) {
+    return false;
+  }
+
+  StoredCalibrationBundleSlot slot_a = {};
+  const bool slot_a_ok = readCalibrationSlot(kCalibrationSlotAAddr, slot_a);
+  StoredCalibrationBundleSlot slot_b = {};
+  const bool slot_b_ok = readCalibrationSlot(kCalibrationSlotBAddr, slot_b);
+
+  const uint32_t next_sequence =
+      (slot_a_ok || slot_b_ok)
+          ? (((slot_a_ok ? slot_a.sequence : 0u) >= (slot_b_ok ? slot_b.sequence : 0u))
+                 ? (slot_a_ok ? slot_a.sequence : 0u)
+                 : (slot_b_ok ? slot_b.sequence : 0u)) +
+                1u
+          : 1u;
+
+  const bool write_slot_a =
+      !slot_a_ok || (slot_b_ok && slot_a.sequence < slot_b.sequence);
+  const uint16_t target_addr = write_slot_a ? kCalibrationSlotAAddr : kCalibrationSlotBAddr;
+  const uint16_t commit_addr =
+      target_addr + static_cast<uint16_t>(offsetof(StoredCalibrationBundleSlot, committed));
+
+  StoredCalibrationBundleSlot stored = {};
   stored.magic = kCalibrationMagic;
   stored.version = kStoreVersion;
-  stored.bundle = bundle;
-  return FM25CL64B::writeObject(kCalibrationAddr, stored);
+  stored.sequence = next_sequence;
+  stored.committed = 0;
+  stored.bundle = stored_bundle;
+  stored.crc32 = calibrationBundleCrc32(stored.sequence, stored.bundle);
+
+  if (!FM25CL64B::writeObject(target_addr, stored)) {
+    return false;
+  }
+  const uint32_t commit_magic = kCalibrationCommitMagic;
+  return FM25CL64B::writeObject(commit_addr, commit_magic);
 }
 
 bool clearCalibrationBundle() {
-  StoredCalibrationBundle stored = {};
-  return FM25CL64B::writeObject(kCalibrationAddr, stored);
-}
-
-bool loadCalibrationBundleCompat(CalibrationBundle& out_bundle) {
-  if (loadCalibrationBundle(out_bundle)) {
-    return out_bundle.foc.valid || out_bundle.direct_input.valid ||
-           out_bundle.as5600.valid || out_bundle.tmag.valid;
-  }
-
-  LegacyCalibrationRecord legacy = {};
-  if (!loadLegacyCalibrationRecord(legacy)) {
-    return false;
-  }
-
-  out_bundle = {};
-  out_bundle.foc.magic = legacy.magic;
-  out_bundle.foc.sensor_direction = legacy.sensor_dir;
-  out_bundle.foc.zero_electrical_angle = legacy.zero_elec;
-  out_bundle.foc.valid = true;
-
-  out_bundle.as5600.magic = legacy.magic;
-  out_bundle.as5600.zero_offset_rad = legacy.as5600_zero_ref;
-  out_bundle.as5600.invert = false;
-  out_bundle.as5600.valid = true;
-  return true;
-}
-
-bool saveCalibrationBundleCompat(const CalibrationBundle& bundle) {
-  if (!saveCalibrationBundle(bundle)) {
-    return false;
-  }
-  saveLegacyCalibrationRecord(bundle);
-  return true;
-}
-
-bool clearCalibrationBundleCompat() {
-  clearLegacyCalibrationRecord();
-  return clearCalibrationBundle();
+  const StoredCalibrationBundleSlot empty_slot = {};
+  return FM25CL64B::writeObject(kCalibrationSlotAAddr, empty_slot) &&
+         FM25CL64B::writeObject(kCalibrationSlotBAddr, empty_slot);
 }
 
 }  // namespace ConfigStore

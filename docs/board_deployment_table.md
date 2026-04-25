@@ -27,15 +27,15 @@ wheel 위치 표기는 다음을 기준으로 한다.
 
 | board label | wheel pos | role | planned node_id | primary CAN ids | profile | control capability | gear ratio | travel limits (deg) | output encoder policy | note |
 |---|---|---|---:|---|---|---|---|---|---|---|
-| `S01` | `FR` | steering front-right | `2` | angle cmd `0x202`, angle status `0x402` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S02` | `BR` | steering back-right | `3` | angle cmd `0x203`, angle status `0x403` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S03` | `FL` | steering front-left | `4` | angle cmd `0x204`, angle status `0x404` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `S04` | `BL` | steering back-left | `1` | angle cmd `0x201`, angle status `0x401` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
-| `D01` | `FR` | driving front-right | `18` | velocity cmd `0x212`, velocity status `0x412` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D02` | `BR` | driving back-right | `19` | velocity cmd `0x213`, velocity status `0x413` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D03` | `FL` | driving front-left | `20` | velocity cmd `0x214`, velocity status `0x414` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `D04` | `BL` | driving back-left | `17` | velocity cmd `0x211`, velocity status `0x411` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `G01` | `-` | gripper | `31` | angle cmd `0x21F`, angle status `0x41F` | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | gripper group |
+| `S01` | `FR` | steering front-right | `1` | angle cmd `0x201`, angle status `0x401` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S02` | `BR` | steering back-right | `2` | angle cmd `0x202`, angle status `0x402` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S03` | `FL` | steering front-left | `3` | angle cmd `0x203`, angle status `0x403` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `S04` | `BL` | steering back-left | `4` | angle cmd `0x204`, angle status `0x404` | `As5600` | angle + velocity | `50:1` | `-120 ~ 120` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | steering group |
+| `D01` | `FR` | driving front-right | `5` | velocity cmd `0x215`, velocity status `0x415` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D02` | `BR` | driving back-right | `6` | velocity cmd `0x216`, velocity status `0x416` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D03` | `FL` | driving front-left | `7` | velocity cmd `0x217`, velocity status `0x417` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `D04` | `BL` | driving back-left | `8` | velocity cmd `0x218`, velocity status `0x418` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
+| `G01` | `-` | gripper | `31` | reserved | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | not released in user-facing spec `1.0.0` |
 
 ## 적용 규칙
 
@@ -56,15 +56,26 @@ wheel 위치 표기는 다음을 기준으로 한다.
 
 주의:
 
-- 현재 펌웨어는 부팅 시 FRAM의 저장된 `can_node_id`를 현재 빌드의 `CAN_NODE_ID`로 자동 동기화한다
-- 따라서 실제 적용 ID는 항상 "이번에 업로드한 펌웨어의 `CAN_NODE_ID`"다
+- 현재 펌웨어는 부팅 시 FRAM의 저장된 `can_node_id`를 현재 빌드 env의 `BUILD_CAN_NODE_ID`로 맞춘다
+- 따라서 실제 적용 ID는 항상 "이번에 업로드한 PlatformIO env의 node_id"다
 - profile과 gear ratio는 CAN 설정 명령 또는 준비된 절차를 통해 각 보드 용도에 맞게 저장해야 한다
+- user-facing spec `1.0.0`은 steering node `1..4`와 driving node `5..8`을 release한다
+- 현재 frame family는 `0x10` 간격이므로 같은 bus의 release node ID는 `1..15` 범위 안에서 관리한다
+- `G01`의 node/protocol allocation은 아직 user-facing contract로 release하지 않는다
 
 ## 권장 배포 순서
 
 1. 대상 보드 라벨을 확인한다.
 2. 이 문서에서 해당 보드의 `planned node_id`, profile, gear ratio를 확인한다.
-3. [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h:57)의 `CAN_NODE_ID`를 맞춘다.
+3. 대상 보드에 맞는 PlatformIO env를 고른다.
+   - `S01`: `custom_f446re_s01`
+   - `S02`: `custom_f446re_s02`
+   - `S03`: `custom_f446re_s03`
+   - `S04`: `custom_f446re_s04`
+   - `D01`: `custom_f446re_d01`
+   - `D02`: `custom_f446re_d02`
+   - `D03`: `custom_f446re_d03`
+   - `D04`: `custom_f446re_d04`
 4. 메인 펌웨어를 업로드한다.
 5. 부팅 후 CAN 상태 프레임 ID가 기대값과 일치하는지 확인한다.
 6. 해당 보드의 profile과 gear ratio가 표와 일치하도록 저장한다.

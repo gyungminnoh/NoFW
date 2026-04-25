@@ -26,6 +26,9 @@ static OutputEncoderType g_pending_output_encoder_type = OutputEncoderType::As56
 static bool g_pending_output_encoder_invert = false;
 static bool g_has_pending_output_encoder_auto_cal = false;
 static OutputEncoderType g_pending_output_encoder_auto_cal_type = OutputEncoderType::As5600;
+static bool g_has_pending_output_encoder_zero_capture = false;
+static OutputEncoderType g_pending_output_encoder_zero_capture_type = OutputEncoderType::As5600;
+static bool g_has_pending_foc_calibration = false;
 static float g_last_pos_mt_rad = 0.0f;
 static uint32_t g_last_pos_sample_ms = 0;
 
@@ -51,6 +54,8 @@ bool init(const ActuatorConfig& actuator_config) {
   g_has_pending_actuator_gear_config = false;
   g_has_pending_output_encoder_config = false;
   g_has_pending_output_encoder_auto_cal = false;
+  g_has_pending_output_encoder_zero_capture = false;
+  g_has_pending_foc_calibration = false;
   g_last_pos_mt_rad = 0.0f;
   g_last_pos_sample_ms = 0;
   return ok;
@@ -154,6 +159,25 @@ void poll(float current_motor_mt_rad) {
       }
       g_pending_output_encoder_auto_cal_type = encoder_type;
       g_has_pending_output_encoder_auto_cal = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::outputEncoderZeroCmdCanId(g_can_node_id)) {
+      OutputEncoderType encoder_type = OutputEncoderType::As5600;
+      if (!CanProtocol::decodeOutputEncoderZeroCmd_OptionA(
+              f.data, f.dlc, encoder_type)) {
+        continue;
+      }
+      g_pending_output_encoder_zero_capture_type = encoder_type;
+      g_has_pending_output_encoder_zero_capture = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::focCalibrationCmdCanId(g_can_node_id)) {
+      if (!CanProtocol::decodeFocCalibrationCmd_OptionA(f.data, f.dlc)) {
+        continue;
+      }
+      g_has_pending_foc_calibration = true;
     }
   }
 
@@ -267,6 +291,23 @@ bool takePendingOutputEncoderAutoCalibration(OutputEncoderType& out_encoder_type
   }
   out_encoder_type = g_pending_output_encoder_auto_cal_type;
   g_has_pending_output_encoder_auto_cal = false;
+  return true;
+}
+
+bool takePendingOutputEncoderZeroCapture(OutputEncoderType& out_encoder_type) {
+  if (!g_has_pending_output_encoder_zero_capture) {
+    return false;
+  }
+  out_encoder_type = g_pending_output_encoder_zero_capture_type;
+  g_has_pending_output_encoder_zero_capture = false;
+  return true;
+}
+
+bool takePendingFocCalibration() {
+  if (!g_has_pending_foc_calibration) {
+    return false;
+  }
+  g_has_pending_foc_calibration = false;
   return true;
 }
 

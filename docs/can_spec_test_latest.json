@@ -2,117 +2,45 @@
   "ok": true,
   "iface": "can0",
   "node_id": 7,
-  "protocol_only": false,
-  "allow_arm": true,
-  "allow_motion": true,
+  "protocol_only": true,
+  "allow_arm": false,
+  "allow_motion": false,
   "results": [
     {
       "name": "protocol frame IDs for node",
       "ok": true,
-      "detail": "angle_cmd=0x207, angle_status=0x407, velocity_cmd=0x217, velocity_status=0x417, limits_status=0x427, config_status=0x437, profile_cmd=0x227, power_cmd=0x237, limits_cmd=0x247, gear_cmd=0x257, encoder_config_cmd=0x267, encoder_auto_cal_cmd=0x277, diag=0x5F7",
-      "elapsed_s": 7.867813110351562e-06
+      "detail": "angle_cmd=0x207, angle_status=0x407, velocity_cmd=0x217, velocity_status=0x417, limits_status=0x427, config_status=0x437, profile_cmd=0x227, power_cmd=0x237, limits_cmd=0x247, gear_cmd=0x257, encoder_config_cmd=0x267, encoder_auto_cal_cmd=0x277, encoder_zero_cmd=0x287, foc_cal_cmd=0x297, diag=0x5F7",
+      "elapsed_s": 1.8596649169921875e-05
     },
     {
       "name": "milli-unit payload encoding",
       "ok": true,
       "detail": "6 vectors",
-      "elapsed_s": 1.71661376953125e-05
+      "elapsed_s": 3.409385681152344e-05
     },
     {
       "name": "candump parser",
       "ok": true,
       "detail": "candump -L format accepted",
-      "elapsed_s": 1.0728836059570312e-05
+      "elapsed_s": 1.9311904907226562e-05
     },
     {
       "name": "runtime diag decoder",
       "ok": true,
       "detail": "0x5F0 payload decoded",
-      "elapsed_s": 5.4836273193359375e-06
+      "elapsed_s": 1.9550323486328125e-05
     },
     {
       "name": "limits/config decoder",
       "ok": true,
       "detail": "0x420/0x430 payloads decoded",
-      "elapsed_s": 4.291534423828125e-06
+      "elapsed_s": 9.298324584960938e-06
     },
     {
       "name": "payload and interface validators",
       "ok": true,
       "detail": "6 invalid cases rejected",
-      "elapsed_s": 3.6716461181640625e-05
-    },
-    {
-      "name": "host CAN tools available",
-      "ok": true,
-      "detail": "candump/cansend found",
-      "elapsed_s": 7.987022399902344e-05
-    },
-    {
-      "name": "live status frames visible",
-      "ok": true,
-      "detail": "profile=As5600, armed=False, limits=0.000..2160.000, gear=8.000",
-      "elapsed_s": 0.44322681427001953
-    },
-    {
-      "name": "runtime status consistency",
-      "ok": true,
-      "detail": "angle=0.176 deg, velocity=0.110 deg/s",
-      "elapsed_s": 0.5001959800720215
-    },
-    {
-      "name": "disarm command is idempotent",
-      "ok": true,
-      "detail": "armed=False",
-      "elapsed_s": 0.49971985816955566
-    },
-    {
-      "name": "actuator limits config roundtrip",
-      "ok": true,
-      "detail": "1.000..2159.000, restored",
-      "elapsed_s": 0.9998288154602051
-    },
-    {
-      "name": "gear ratio config roundtrip",
-      "ok": true,
-      "detail": "8.125, restored 8.000",
-      "elapsed_s": 1.0000088214874268
-    },
-    {
-      "name": "current profile command succeeds while disarmed",
-      "ok": true,
-      "detail": "profile=As5600, result=Ok",
-      "elapsed_s": 0.5001099109649658
-    },
-    {
-      "name": "invalid profile command is ignored",
-      "ok": true,
-      "detail": "profile stayed As5600",
-      "elapsed_s": 0.49993205070495605
-    },
-    {
-      "name": "arm/disarm status transition",
-      "ok": true,
-      "detail": "True -> False",
-      "elapsed_s": 1.5311739444732666
-    },
-    {
-      "name": "profile/config commands rejected while armed",
-      "ok": true,
-      "detail": "profile_result=RejectedArmed",
-      "elapsed_s": 1.5337510108947754
-    },
-    {
-      "name": "angle command small-step response",
-      "ok": true,
-      "detail": "0.159 -> 1.420 deg toward target 2.159",
-      "elapsed_s": 2.3107845783233643
-    },
-    {
-      "name": "velocity command small-step response",
-      "ok": true,
-      "detail": "observed_velocity=9.723 deg/s",
-      "elapsed_s": 2.0350842475891113
+      "elapsed_s": 8.559226989746094e-05
     }
   ]
 }

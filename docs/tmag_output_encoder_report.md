@@ -177,8 +177,8 @@ score = dx^2 + dy^2 + dz^2
 
 현재 메인 펌웨어는:
 
-- 새 calibration bundle 형식을 우선 사용하고
-- 예전 단일 calibration record 형식은 fallback 및 병행 저장으로 유지한다
+- CRC/commit marker가 있는 trusted calibration slot만 사용하고
+- 예전 단일 calibration record 형식은 fallback으로 사용하지 않는다
 - `gear_ratio == 1:1`이면 `AS5048A`를 출력축 엔코더처럼 사용하는 `DirectInput` 경로도 지원한다
 
 ## 4. 정확도 검증 방법

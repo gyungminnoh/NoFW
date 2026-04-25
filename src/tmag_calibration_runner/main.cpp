@@ -259,7 +259,7 @@ void saveCalibrationResult() {
   g_tmag_calibration.magic = kCalibrationRecordMagic;
   g_tmag_calibration.valid = true;
   g_calibration_bundle.tmag = g_tmag_calibration;
-  ConfigStore::saveCalibrationBundleCompat(g_calibration_bundle);
+  ConfigStore::saveCalibrationBundle(g_calibration_bundle);
   g_saved = true;
 }
 
@@ -354,12 +354,12 @@ void initMotionSystem() {
   g_input_sensor.update();
 
   if (!ConfigStore::loadActuatorConfig(g_actuator_config)) {
-    g_actuator_config = buildLegacyActuatorConfig();
+    g_actuator_config = buildDefaultActuatorConfig();
     ConfigStore::saveActuatorConfig(g_actuator_config);
-  } else if (migrateStaleActuatorConfigDefaults(g_actuator_config)) {
+  } else if (syncActuatorConfigToFirmwareDefaults(g_actuator_config)) {
     ConfigStore::saveActuatorConfig(g_actuator_config);
   }
-  ConfigStore::loadCalibrationBundleCompat(g_calibration_bundle);
+  ConfigStore::loadCalibrationBundle(g_calibration_bundle);
 
   g_driver.voltage_power_supply = BUS_VOLTAGE;
   g_driver.voltage_limit = VOLTAGE_LIMIT;
@@ -393,7 +393,7 @@ void initMotionSystem() {
   g_calibration_bundle.foc.sensor_direction = static_cast<int8_t>(g_motor.sensor_direction);
   g_calibration_bundle.foc.zero_electrical_angle = g_motor.zero_electric_angle;
   g_calibration_bundle.foc.valid = true;
-  ConfigStore::saveCalibrationBundleCompat(g_calibration_bundle);
+  ConfigStore::saveCalibrationBundle(g_calibration_bundle);
 
   g_builder.reset(kTmagCalibrationGearRatio);
   updateMotorUnwrapped();

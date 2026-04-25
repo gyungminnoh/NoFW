@@ -2322,3 +2322,963 @@ When working on hardware-related tasks in this repo, prefer this order:
   - add CAN-visible result/status for output encoder auto-calibration success/failure
   - extend the spec runner after that change so it can assert AS5600 direction auto-calibration result codes directly
   - expose output encoder config and auto-calibration in the web UI
+
+## 2026-04-25 - S01 firmware upload
+
+- Completed:
+  - prepared the main firmware build for board label `S01` from the deployment table:
+    - `CAN_NODE_ID = 2`
+    - compile-time default `GEAR_RATIO = 50.0f`
+  - built and uploaded the main firmware:
+    - `pio run -e custom_f446re`
+    - `pio run -e custom_f446re -t upload`
+    - upload finished with verify OK and target reset
+  - ran the local protocol-only spec test after the firmware constant change:
+    - `python3 tools/can_spec_test.py --protocol-only`
+    - result: `6/6` passed
+- Blocked:
+  - post-upload CAN provisioning/verification could not be run in this session because Linux reported:
+    - `Device "can0" does not exist.`
+  - therefore S01 FRAM settings were not verified or saved over CAN from this host in this session:
+    - profile `As5600`
+    - gear ratio `50.0`
+    - limits `-120 .. 120 deg`
+- Next:
+  - when a CAN interface is available, bring up the bus at `1 Mbps` and verify node `2`
+  - save/verify S01 runtime settings over CAN:
+    - profile command `0x222#01`
+    - gear command `0x252#50C30000`
+    - limits command `0x242#402BFEFFC0D40100`
+
+## 2026-04-25 - Firmware-default FRAM config sync
+
+- Completed:
+  - changed actuator-config boot sync policy so it no longer updates only `can_node_id`
+  - added `syncActuatorConfigToFirmwareDefaults(...)` in
+    [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp)
+  - the helper now compares the full stored `ActuatorConfig` against the current firmware defaults and,
+    if any field differs, rewrites the full config to the firmware values
+  - applied the same sync policy in both boot paths:
+    - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+    - [src/tmag_calibration_runner/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/tmag_calibration_runner/main.cpp)
+  - effect:
+    - on firmware boot, stored `ActuatorConfig` fields such as profile, control mode, gear ratio,
+      travel limits, capability bits, sign, version, and `can_node_id` are now forced to the build defaults
+      whenever they differ
+    - calibration bundle data is unchanged by this policy
+  - verification:
+    - `pio run -e custom_f446re`
+    - `python3 tools/can_spec_test.py --protocol-only`
+    - both passed
+- Next:
+  - if this policy should also overwrite calibration records on boot, add a separate explicit calibration-sync policy instead of folding that into `ActuatorConfig`
+
+## 2026-04-25 - S01 re-upload on replacement board
+
+- Completed:
+  - rechecked the current build target for the replacement board:
+    - `CAN_NODE_ID = 2`
+    - `GEAR_RATIO = 50.0f`
+  - rebuilt and re-uploaded the S01 main firmware:
+    - `pio run -e custom_f446re`
+    - `pio run -e custom_f446re -t upload`
+    - upload finished with verify OK and target reset
+  - reran protocol-only host validation:
+    - `python3 tools/can_spec_test.py --protocol-only`
+    - result: `6/6` passed
+  - attempted live CAN validation for node `2`:
+    - `python3 tools/can_spec_test.py --iface can0 --node-id 2 --report docs/can_spec_test_latest.json`
+- Blocked:
+  - Linux still reports `can0` as present but `state DOWN`
+  - this shell could not bring the interface up at `1 Mbps`:
+    - `ip link set can0 type can bitrate 1000000` -> `Operation not permitted`
+    - `ip link set can0 up` -> `Operation not permitted`
+  - because of that, live validation failed at the transport layer:
+    - no diag / limits / config frames observed
+    - `cansend can0 232#00` failed
+- Next:
+  - bring `can0` up with sufficient privilege at `1 Mbps`
+  - rerun the live spec test for node `2`
+  - if live status becomes visible, confirm that the replacement board boot synced FRAM config to the S01 firmware defaults
+
+Update after live retry:
+
+- `can0` was brought up successfully at `1 Mbps`
+- reran live validation:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 2 --report docs/can_spec_test_latest.json`
+  - result: `14/14` passed
+- observed live boot/runtime state on the replacement board:
+  - profile: `As5600`
+  - armed: `False`
+  - gear ratio: `50.000`
+  - limits: `0.000 .. 345.600 deg`
+- important conclusion:
+  - full `ActuatorConfig` boot sync is working on real hardware
+  - however the synced travel limits came from the current firmware defaults, which are still
+    `0 .. ACTUATOR_OUTPUT_MAX_DEG = 345.6 deg` for this `50:1` build
+  - so the current firmware does **not** yet encode the S01 deployment-table travel range
+    `-120 .. 120 deg` as a build default
+- Next:
+  - if S01 should boot with `-120 .. 120 deg` automatically, change the firmware build defaults
+    for actuator travel instead of relying on post-boot CAN provisioning
+
+Update after deployment-default fix:
+
+- changed the build-time deployed travel defaults for the current board build:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+    - `ACTUATOR_OUTPUT_DEFAULT_MIN_DEG = -120.0f`
+    - `ACTUATOR_OUTPUT_DEFAULT_MAX_DEG = 120.0f`
+  - [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp)
+    - default actuator config creation and stale-default migration now use those explicit deployed limits
+- rebuilt and re-uploaded the S01 firmware:
+  - `pio run -e custom_f446re`
+  - `pio run -e custom_f446re -t upload`
+- reran live validation on node `2`:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 2 --report docs/can_spec_test_latest.json`
+  - result: `14/14` passed
+- confirmed real hardware boot state after upload:
+  - profile `As5600`
+  - gear ratio `50.000`
+  - limits `-120.000 .. 120.000 deg`
+  - armed `False`
+- conclusion:
+  - the full-config boot sync now matches the deployment table for the current S01 build
+- Next:
+  - when changing target boards, update the build defaults from the deployment table before uploading so boot-time FRAM sync applies the intended node/profile/gear/limits automatically
+
+Update 2026-04-25:
+
+- added a remote CAN zero-capture command for `As5600`:
+  - new command ID base: `0x280 + node_id`
+  - purpose: save the current `AS5600` absolute angle as output `0 deg` and refresh boot reference
+  - files updated:
+    - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+    - [include/can_protocol.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_protocol.h)
+    - [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp)
+    - [include/can_service.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_service.h)
+    - [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp)
+    - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+    - [tools/can_spec_test.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_spec_test.py)
+    - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+    - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+- verified local checks after the protocol addition:
+  - `pio run -e custom_f446re`
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - result: passed
+- current ST-Link was connected only to `S01`, so uploaded only the `S01` build (`CAN_NODE_ID = 2`):
+  - `pio run -e custom_f446re -t upload`
+  - result: success
+- verified live CAN behavior for `S01` on `can0`:
+  - before zero capture, `0x402` reported about `2.443 deg`
+  - sent `cansend can0 282#01`
+  - after zero capture, `0x402` reported about `0.018 deg`
+  - this confirms the current `AS5600` angle was saved as the new output `0 deg`
+- reran live node test on `S01`:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 2 --report /tmp/can_node2_zero_capture.json`
+  - result: `14/14` passed
+- stop point:
+  - additional board uploads require physically moving the ST-Link to the next board before proceeding
+
+Update 2026-04-25:
+
+- adjusted `ActuatorConfig` persistence so `can_node_id` is no longer treated as a runtime-persistent setting
+  - [src/storage/config_store.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/storage/config_store.cpp)
+  - on load: stored `can_node_id` is ignored and replaced with the current firmware `CAN_NODE_ID`
+  - on save: the serialized snapshot is forced to the current firmware `CAN_NODE_ID`
+  - effect: node identity now follows firmware upload/build selection rather than old FRAM contents
+  - note: storage layout was kept compatible; only source-of-truth semantics changed
+- verification:
+  - `pio run -e custom_f446re`
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - result: passed
+
+Update 2026-04-25:
+
+- changed steering node mapping to match board numbers:
+  - `S01 -> node 1`
+  - `S02 -> node 2`
+  - `S03 -> node 3`
+  - `S04 -> node 4`
+- moved steering firmware node selection out of [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  and into `platformio.ini` env selection so there is a single source of truth per build
+- added dedicated envs:
+  - `custom_f446re_s01`
+  - `custom_f446re_s02`
+  - `custom_f446re_s03`
+  - `custom_f446re_s04`
+- `board_config.h` now requires `BUILD_CAN_NODE_ID` from the selected env and no longer carries
+  a hand-edited steering node constant
+- updated docs:
+  - [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
+  - [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+  - [docs/host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
+- verification:
+  - `pio run -e custom_f446re_s03`
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - result: passed
+
+Update 2026-04-25:
+
+- extended the env-based node-id scheme to driving boards too
+- driving mapping is now aligned to readable hex IDs:
+  - `D01 -> node 17 (0x11)`
+  - `D02 -> node 18 (0x12)`
+  - `D03 -> node 19 (0x13)`
+  - `D04 -> node 20 (0x14)`
+- added PlatformIO envs:
+  - `custom_f446re_d01`
+  - `custom_f446re_d02`
+  - `custom_f446re_d03`
+  - `custom_f446re_d04`
+- updated operational docs:
+  - [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
+  - [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)
+  - [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+- verification:
+  - `pio run -e custom_f446re_d01`
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - result: passed
+
+Update 2026-04-25:
+
+- retuned `S01` angle/velocity loop after motor change using live CAN motion checks and repeated re-upload
+- final applied gains in [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp):
+  - `motor.PID_velocity.P = 0.12`
+  - `motor.PID_velocity.I = 2.0`
+  - `motor.PID_velocity.D = 0.0`
+  - `pvc.Kp = 3.0`
+- tuning notes:
+  - baseline with old `pvc.Kp = 2.45`:
+    - `20 deg` angle step: `t90 ~= 1.58 s`, overshoot `0 deg`
+    - `20 deg/s` velocity step: tail error about `-0.05 deg/s`
+  - candidate `pvc.Kp = 3.0` improved angle response:
+    - `20 deg` angle step: `t90 ~= 1.43 s`, overshoot about `0.01 deg`
+    - large step to `90 deg`: `t90 ~= 1.00 s`, overshoot about `0.01 deg`
+  - candidate velocity retune `P/I = 0.11/1.6` did not improve the larger `60 deg/s` step enough, so it was reverted
+- final decision:
+  - keep inner velocity loop at `0.12 / 2.0 / 0.0`
+  - raise outer angle `Kp` to `3.0`
+- final verification:
+  - `pio run -e custom_f446re_s01 -t upload`
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 1 --report /tmp/can_node1_after_pid_tune.json`
+  - result: `14/14` passed
+
+Update 2026-04-25:
+
+- checked `tools/can_ui/server.py` and `tools/can_ui/static/app.js` for multi-motor bus support before opening the web UI
+- confirmed no code change was required:
+  - the server tracks one selected node at a time
+  - the UI can switch target node through `/api/session`
+  - this is compatible with multiple motors on the same CAN bus as long as the operator selects the intended `node_id`
+- started the web UI server with:
+  - `python3 tools/can_ui/server.py --host 0.0.0.0 --port 8765 --can-iface can0 --node-id 1`
+- initial server run saw `candump` failures because `can0` had gone down
+- recovered CAN interface with:
+  - `sudo ip link set can0 down`
+  - `sudo ip link set can0 type can bitrate 1000000`
+  - `sudo ip link set can0 up`
+- verified recovery through `http://127.0.0.1:8765/api/state`
+  - `link_alive: true`
+  - live node `1` angle/velocity/config/diag frames present
+- current usage note:
+  - open `http://127.0.0.1:8765`
+  - when multiple motors share the bus, change `Node ID` in the session controls and apply it before sending commands
+
+Update 2026-04-25:
+
+- checked the user's report of large-angle shaking on `S01 / node 1` by running direct live CAN motion steps
+- before testing:
+  - stopped the CAN UI latched command stream
+  - disarmed the power stage
+- executed two large output-angle steps on node `1`:
+  - `-90 -> +90 deg`
+  - `+90 -> -90 deg`
+- measured from live angle/velocity status:
+  - `-90 -> +90 deg`
+    - final `90.027 deg`
+    - overshoot `0.029 deg`
+    - `t90 ~= 1.70 s`
+    - post-target velocity sign flips above `3 deg/s`: `0`
+  - `+90 -> -90 deg`
+    - final `-89.971 deg`
+    - overshoot `2.671 deg`
+    - `t90 ~= 1.90 s`
+    - post-target velocity sign flips above `3 deg/s`: `1`
+    - post-target velocity RMS `11.185 deg/s`
+- interpretation:
+  - there is no strong sustained oscillation in the `-90 -> +90` direction
+  - the reverse direction shows a noticeable but still damped ring/jerk near target, so the user's complaint is plausible
+  - the behavior looks asymmetric rather than globally unstable
+- after the motion check:
+  - confirmed the node returned to disarmed idle state
+  - reran `python3 tools/can_spec_test.py --iface can0 --node-id 1 --report /tmp/can_node1_after_large_step_check.json`
+  - result: `14/14` passed
+
+Update 2026-04-25:
+
+- left steering PID gains unchanged after the large-angle motion check
+- recorded the current steering operating gains in [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md):
+  - `motor.PID_velocity.P = 0.12`
+  - `motor.PID_velocity.I = 2.0`
+  - `motor.PID_velocity.D = 0.0`
+  - `pvc.Kp = 3.0`
+
+Update 2026-04-25:
+
+- ran a simultaneous 4-axis steering sweep test over CAN
+- test profile:
+  - nodes `1..4` armed together
+  - output-angle triangle sweep
+  - range `-90 .. +90 deg`
+  - half sweep `12 s`
+  - `2` full cycles
+  - command rate `20 Hz`
+- after the sweep, all four nodes were returned toward `0 deg` and disarmed again
+- measured angle range per node:
+  - node `1`: about `-87.158 .. 86.999 deg`
+  - node `2`: about `-23.063 .. 51.749 deg`
+  - node `3`: about `-87.006 .. 87.017 deg`
+  - node `4`: about `-87.034 .. 86.969 deg`
+- interpretation:
+  - nodes `1`, `3`, `4` tracked the simultaneous slow sweep normally
+  - node `2` did not follow the commanded sweep range and needs separate investigation
+
+Update 2026-04-25:
+
+- created a summary graph for the simultaneous 4-axis sweep incident using the measured node-wise angle range and max velocity
+- output file:
+  - [docs/s02_sweep_incident_summary_2026-04-25.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/s02_sweep_incident_summary_2026-04-25.svg)
+- limitation:
+  - the original raw time-series samples from that sweep were not persisted, so this graph shows the measured range summary rather than a full angle-vs-time trace
+
+Update 2026-04-26:
+
+- hardened FRAM calibration bundle persistence against partial writes and stale garbage values
+- changed [src/storage/config_store.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/storage/config_store.cpp):
+  - calibration bundle now uses two fixed slots in FRAM instead of trusting a single record
+  - each slot stores:
+    - `magic`
+    - `version`
+    - `sequence`
+    - `crc32`
+    - `committed` marker
+    - calibration bundle payload
+  - save path writes an uncommitted slot first, then writes the commit marker last
+  - load path picks the newest slot whose header, commit marker, and CRC are all valid
+  - old single-slot records are no longer accepted as a fallback
+  - added sanity checks for per-calibration payload validity instead of trusting only the stored `valid` bool
+- clean-refactor follow-up:
+  - removed calibration compatibility load/save APIs from [include/storage/config_store.h](/home/gyungminnoh/projects/NoFW/NoFW/include/storage/config_store.h)
+  - removed old `ActuatorConfigV1` fallback loading and stale-default migration
+  - renamed the default config helper to `buildDefaultActuatorConfig()`
+  - product firmware, FRAM test firmware, and TMAG calibration runner now use only the trusted bundle API
+  - existing boards that only have old config or old single-record calibration layouts will be reset to firmware defaults and boot as uncalibrated after this firmware
+  - those boards must create a fresh trusted calibration slot on first arm/calibration
+- runtime safety changes:
+  - lowered `TORQUE_LIMIT_VOLTS` to `12.0`
+  - added angle following-error fault detection and automatic disarm
+  - runtime diagnostic `0x5F0 + node_id` now reports trusted calibration status and runtime fault code
+- updated decoders/docs:
+  - [tools/can_spec_test.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_spec_test.py)
+  - [tools/can_ui/server.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/server.py)
+  - [tools/can_ui/static/app.js](/home/gyungminnoh/projects/NoFW/NoFW/tools/can_ui/static/app.js)
+  - [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)
+- verification:
+  - `pio run -e custom_f446re_s01`
+  - `pio run -e custom_f446re_s02`
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - `pio run -e tmag_calibration_runner_f446re`
+  - `pio run -e fram_test_f446re`
+  - result: passed
+
+Update 2026-04-26:
+
+- flashed the currently ST-Link-connected board as `S01` using the clean-refactor firmware:
+  - `pio run -e custom_f446re_s01 -t upload`
+  - result: upload success, verify OK, target reset
+- important expected first-boot behavior:
+  - old config/calibration layouts are not accepted by this firmware
+  - the board should use S01 firmware defaults and create a fresh trusted calibration slot on first arm/calibration
+
+Follow-up validation:
+
+- brought `can0` up at `1 Mbps`
+- confirmed S01/node `1` runtime status before first arm:
+  - diag `FB01010103000101`
+  - profile `As5600`
+  - trusted calibration absent
+  - `need_calibration = 1`
+  - `armed = 0`
+- ran live CAN spec before calibration:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 1 --report docs/can_spec_test_latest.json`
+  - result: `14/14` passed
+- sent first arm command:
+  - `cansend can0 231#01`
+  - observed diag `FB0101011F001003`
+  - trusted FOC/output calibration valid
+  - `need_calibration = 0`
+  - runtime fault `None`
+  - `armed = 1`
+- disarmed:
+  - `cansend can0 231#00`
+  - observed diag `FB0101011F001001`
+  - trusted calibration remained valid
+  - `armed = 0`
+- reran live CAN spec after calibration:
+  - `python3 tools/can_spec_test.py --iface can0 --node-id 1 --report docs/can_spec_test_latest.json`
+  - result: `14/14` passed
+
+S01 small motion check:
+
+- armed S01/node `1`:
+  - `cansend can0 231#01`
+- sent a single `+10 deg` angle command:
+  - `cansend can0 201#10270000`
+  - observation: motion started but stopped around an intermediate angle because the angle command timed out and current-angle hold took over
+- repeated `+10 deg` command at `20 Hz` for about `4 s`:
+  - reached and held about `10.000 deg`
+  - runtime diag stayed `FB0101011F001003` (`armed = 1`, no fault)
+- repeated `0 deg` command at `20 Hz` for about `4 s`:
+  - returned to about `0.000 deg`
+- disarmed:
+  - `cansend can0 231#00`
+  - final diag `FB0101011F001001` (`armed = 0`, trusted calibration valid, no fault)
+- note:
+  - with the current timeout policy, host-side angle moves should stream the target command until the target is reached
+
+Update 2026-04-26:
+
+- added a dedicated user-facing external contract document:
+  - [docs/user_facing_spec.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/user_facing_spec.md)
+- documented spec version `1.0.0` and stability policy:
+  - CAN bitrate, frame IDs, payload endian/scale, enum values, board/node mapping, timeout semantics, and diagnostic meanings are treated as stable user-facing contract
+  - breaking changes require a major spec version bump and should use new IDs/fields instead of silently changing existing meanings
+- important protocol finding while writing the spec:
+  - current frame families are spaced by `0x10`, so node IDs above `15` are not collision-free across all command/status families
+  - therefore spec `1.0.0` releases only steering nodes `S01..S04` (`1..4`)
+  - driving nodes `D01..D04` (`17..20`) are now documented as reserved/not released until protocol allocation is redesigned
+- updated references:
+  - [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md)
+  - [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)
+  - [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)
+
+Follow-up correction:
+
+- user chose the collision-free node reassignment option for driving boards
+- changed driving build env node IDs:
+  - `D01 -> node 5`
+  - `D02 -> node 6`
+  - `D03 -> node 7`
+  - `D04 -> node 8`
+- updated [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini), [docs/user_facing_spec.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/user_facing_spec.md),
+  [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md),
+  [docs/can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md), and
+  [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md)
+- user-facing spec `1.0.0` now releases:
+  - steering `S01..S04 -> 1..4`
+  - driving `D01..D04 -> 5..8`
+- `G01` remains outside the released user-facing contract until its allocation is decided
+- verification:
+  - `python3 tools/can_spec_test.py --protocol-only`
+  - `pio run -e custom_f446re_d01`
+  - `pio run -e custom_f446re_d04`
+  - `git diff --check`
+  - result: passed
+
+S01 upload after D-node remap:
+
+- flashed the currently ST-Link-connected board as `S01`:
+  - `pio run -e custom_f446re_s01 -t upload`
+  - result: upload success, verify OK, target reset
+
+S01 +90 deg motion check:
+
+- brought `can0` up at `1 Mbps`
+- observed S01/node `1` after upload:
+  - diag `FB01010103000101`
+  - trusted calibration absent after clean-refactor upload
+  - `need_calibration = 1`
+- sent arm command:
+  - `cansend can0 231#01`
+  - observed diag `FB0101011F000003`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - runtime fault `None`
+  - `armed = 1`
+- streamed `+90.000 deg` target at about `20 Hz`:
+  - `cansend can0 201#905F0100`
+  - reached about `90.000 deg`
+  - no runtime fault observed
+- disarmed after the motion check:
+  - `cansend can0 231#00`
+  - final diag `FB0101011F000001`
+  - final angle status about `89.97 deg`
+
+S01 slow sweep check:
+
+- swept only S01/node `1` over `-90 .. +90 deg`
+- command profile:
+  - started from the current measured position near `61.9 deg`
+  - streamed target at about `20 Hz`
+  - `+90 -> -90` over about `18 s`
+  - `-90 -> +90` over about `18 s`
+- observed samples:
+  - near negative end: target about `-89.6 deg`, measured about `-86.5 deg`
+  - final positive end: measured about `89.9 deg`
+  - runtime fault stayed `0`
+- final state:
+  - disarmed with `cansend can0 231#00`
+  - final diag `FB0101011F000001`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - `armed = 0`
+
+S01 slow sweep with velocity logging:
+
+- repeated S01/node `1` slow sweep over `-90 .. +90 deg`
+- command profile:
+  - `+90 -> -90` over about `18 s`
+  - `-90 -> +90` over about `18 s`
+  - target command stream about `20 Hz`
+- generated log/plot files:
+  - [docs/s01_sweep_velocity_log_20260426_012827.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/s01_sweep_velocity_log_20260426_012827.csv)
+  - [docs/s01_sweep_velocity_plot_20260426_012827.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/s01_sweep_velocity_plot_20260426_012827.svg)
+- log summary:
+  - samples: `719`
+  - measured angle range: about `-87.770 .. 89.899 deg`
+  - measured velocity range: about `-14.098 .. 18.940 deg/s`
+  - fault samples: `0`
+  - last sweep sample: `85.769 deg`
+  - after the final `+90 deg` hold and disarm, final observed state was about `89.987 deg`
+- final diagnostic:
+  - `FB0101011F000001`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 0`
+
+S03 upload:
+
+- flashed the currently ST-Link-connected board as `S03`:
+  - `pio run -e custom_f446re_s03 -t upload`
+  - result: upload success, verify OK, target reset
+
+S03 +90 deg motion check:
+
+- brought `can0` up at `1 Mbps`
+- confirmed S03/node `3` after upload:
+  - diag `FB01010103000101`
+  - trusted calibration absent after clean-refactor upload
+  - `need_calibration = 1`
+- sent arm command:
+  - `cansend can0 233#01`
+  - observed diag `FB0101011F000003`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 1`
+- streamed `+90.000 deg` target at about `20 Hz`:
+  - `cansend can0 203#905F0100`
+  - reached about `89.9 deg`
+  - no runtime fault observed
+- disarmed after the motion check:
+  - `cansend can0 233#00`
+  - final diag `FB0101011F000001`
+  - final angle status about `89.93 deg`
+
+S03 slow sweep check:
+
+- swept only S03/node `3` over `-90 .. +90 deg`
+- test time: `2026-04-26 01:40 KST`
+- command profile:
+  - started from the current measured position near `89.9 deg`
+  - streamed target at about `20 Hz`
+  - `+90 -> -90` over about `18 s`
+  - `-90 -> +90` over about `18 s`
+- observed samples:
+  - near negative end: target about `-89.5 deg`, measured about `-86.8 deg`
+  - return sweep crossed zero normally, with velocity about `10 deg/s`
+  - final positive end: measured about `89.8 deg`
+  - runtime fault stayed `0`
+- final state:
+  - disarmed with `cansend can0 233#00`
+  - final diag `FB0101011F000001`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - `armed = 0`
+
+S03 slow sweep with velocity logging:
+
+- repeated S03/node `3` slow sweep over `-90 .. +90 deg`
+- test time: `2026-04-26 01:43 KST`
+- command profile:
+  - `+90 -> -90` over about `18 s`
+  - `-90 -> +90` over about `18 s`
+  - target command stream about `20 Hz`
+- generated log/plot files:
+  - [docs/s03_sweep_velocity_log_20260426_014211.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/s03_sweep_velocity_log_20260426_014211.csv)
+  - [docs/s03_sweep_velocity_plot_20260426_014211.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/s03_sweep_velocity_plot_20260426_014211.svg)
+- log summary:
+  - samples: `738`
+  - measured angle range: about `-88.006 .. 89.875 deg`
+  - measured velocity range: about `-10.863 .. 10.890 deg/s`
+  - fault samples: `0`
+  - after the final `+90 deg` hold and disarm, final observed state was about `89.875 deg`
+- final diagnostic:
+  - `FB0101011F000001`
+  - trusted calibration valid
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 0`
+
+S01 upload:
+
+- test time: `2026-04-26 02:02 KST`
+- flashed the currently ST-Link-connected board as `S01`:
+  - `pio run -e custom_f446re_s01 -t upload`
+  - result: upload success, verify OK, target reset
+
+S01 VelocityOnly profile and FOC calibration:
+
+- test time: `2026-04-26 02:06 KST`
+- brought `can0` up at `1 Mbps`
+- initial S01/node `1` state after upload:
+  - config `431#50C3000001010300`
+  - stored/active profile `As5600`
+  - default control mode `OutputAngle`
+  - velocity and angle modes enabled
+  - diag `FB01010103000101`
+  - trusted FOC calibration absent
+  - trusted output calibration absent
+  - `need_calibration = 1`
+  - runtime fault `0`
+  - `armed = 0`
+- changed S01 to `VelocityOnly` profile:
+  - sent `cansend can0 221#00`
+  - observed config `431#50C3000000020100`
+  - stored profile `VelocityOnly`
+  - default control mode `OutputVelocity`
+  - velocity mode enabled
+  - angle mode disabled
+- ran FOC calibration by arming while trusted FOC calibration was absent:
+  - sent zero velocity command on `0x211`
+  - sent arm command `cansend can0 231#01`
+  - observed transition to diag `FB0000021D001002`
+  - trusted FOC calibration valid
+  - trusted output calibration valid for current `VelocityOnly` profile
+  - calibration load status `Trusted`
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 1`
+- disarmed after calibration:
+  - sent `cansend can0 231#00`
+  - final diag `FB0000021D001000`
+  - final config `431#50C3000000020100`
+  - runtime fault `0`
+  - `need_calibration = 0`
+  - `armed = 0`
+
+S01 gear ratio update and velocity command:
+
+- test time: `2026-04-26 02:08 KST`
+- S01/node `1` initial state:
+  - config `431#50C3000000020100`
+  - gear ratio `50.000`
+  - profile `VelocityOnly`
+  - default control mode `OutputVelocity`
+  - diag `FB0000021D001000`
+  - trusted FOC valid
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 0`
+- updated gear ratio to `5.000`:
+  - sent `cansend can0 251#88130000`
+  - observed config `431#8813000000020100`
+  - gear ratio `5.000`
+  - profile `VelocityOnly`
+  - default control mode `OutputVelocity`
+- armed and commanded `+10 deg/s` output velocity:
+  - sent zero velocity command on `0x211`
+  - sent arm command `cansend can0 231#01`
+  - observed diag `FB0000021D001002`
+  - streamed `cansend can0 211#10270000` for about `5 s`
+  - runtime fault stayed `0`
+  - observed output velocity status range was about `-0.264 .. 3.252 deg/s`, lower than the `10 deg/s` command
+- stopped safely:
+  - sent zero velocity commands
+  - sent `cansend can0 231#00`
+  - final diag `FB0000021D001000`
+  - final config `431#8813000000020100`
+  - runtime fault `0`
+  - `armed = 0`
+
+S02 upload:
+
+- test time: `2026-04-26 02:12 KST`
+- flashed the currently ST-Link-connected board as `S02`:
+  - `pio run -e custom_f446re_s02 -t upload`
+  - result: upload success, verify OK, target reset
+
+S04 upload:
+
+- test time: `2026-04-26 02:13 KST`
+- flashed the currently ST-Link-connected board as `S04`:
+  - `pio run -e custom_f446re_s04 -t upload`
+  - result: upload success, verify OK, target reset
+
+S02 +90 deg motion attempt:
+
+- test time: `2026-04-26 02:16 KST`
+- sent disarm commands to steering nodes `1..4` before testing S02 only
+- S02/node `2` initial state:
+  - config `432#50C3000001010300`
+  - gear ratio `50.000`
+  - stored/active profile `As5600`
+  - default control mode `OutputAngle`
+  - velocity and angle modes enabled
+  - diag `FB01010103000101`
+  - trusted FOC calibration absent
+  - trusted output calibration absent
+  - `need_calibration = 1`
+  - runtime fault `0`
+  - `armed = 0`
+- attempted to arm S02 before sending the `+90 deg` target:
+  - sent current-angle hold target on `0x202`
+  - sent arm command `cansend can0 232#01`
+  - S02 stayed disarmed while FOC initialization was running
+  - then reported diag `FB01010103020101`
+  - runtime fault `2` (`FocInitFailed`)
+  - trusted FOC calibration still absent
+  - `need_calibration = 1`
+  - `armed = 0`
+- did not send the `+90 deg` motion command after the arm failure
+- sent disarm/clear command:
+  - `cansend can0 232#00`
+  - final diag `FB01010103000101`
+  - runtime fault cleared to `0`
+  - trusted FOC still absent
+  - `need_calibration = 1`
+  - `armed = 0`
+
+S04 +90 deg motion check:
+
+- test time: `2026-04-26 02:18 KST`
+- sent disarm commands to steering nodes `1..4` before testing S04 only
+- S04/node `4` initial state:
+  - config `434#50C3000001010300`
+  - gear ratio `50.000`
+  - stored/active profile `As5600`
+  - default control mode `OutputAngle`
+  - velocity and angle modes enabled
+  - diag `FB01010103000101`
+  - trusted FOC calibration absent
+  - trusted output calibration absent
+  - `need_calibration = 1`
+  - runtime fault `0`
+  - `armed = 0`
+- armed S04 before motion:
+  - sent current-angle hold target on `0x204`
+  - sent arm command `cansend can0 234#01`
+  - arm completed after FOC and AS5600 calibration save
+  - observed diag `FB0101011F000003`
+  - trusted FOC calibration valid
+  - trusted output calibration valid
+  - `need_calibration = 0`
+  - runtime fault `0`
+  - `armed = 1`
+- commanded `+90 deg` target:
+  - streamed `cansend can0 204#905F0100`
+  - observed about `57.3 deg` at `1.0 s`
+  - observed about `89.6 deg` at `2.1 s`
+  - settled around `90.03 deg`
+  - runtime fault stayed `0`
+- disarmed after the motion check:
+  - sent `cansend can0 234#00`
+  - final diag `FB0101011F000001`
+  - final angle status about `90.018 deg`
+  - runtime fault `0`
+  - `need_calibration = 0`
+  - `armed = 0`
+
+S02 +90 deg motion retry:
+
+- test time: `2026-04-26 02:20 KST`
+- sent disarm commands to steering nodes `1..4` before testing S02 only
+- S02/node `2` initial state:
+  - config `432#50C3000001010300`
+  - gear ratio `50.000`
+  - stored/active profile `As5600`
+  - default control mode `OutputAngle`
+  - velocity and angle modes enabled
+  - diag `FB01010103000101`
+  - trusted FOC calibration absent
+  - trusted output calibration absent
+  - `need_calibration = 1`
+  - runtime fault `0`
+  - `armed = 0`
+- attempted to arm S02 before sending the `+90 deg` target:
+  - sent current-angle hold target on `0x202`
+  - sent arm command `cansend can0 232#01`
+  - S02 again reported diag `FB01010103020101`
+  - runtime fault `2` (`FocInitFailed`)
+  - trusted FOC calibration still absent
+  - `need_calibration = 1`
+  - `armed = 0`
+- did not send the `+90 deg` motion command after the arm failure
+- sent disarm/clear command:
+  - `cansend can0 232#00`
+  - final diag `FB01010103000101`
+  - runtime fault cleared to `0`
+  - trusted FOC still absent
+  - `need_calibration = 1`
+  - `armed = 0`
+
+S02 re-upload:
+
+- test time: `2026-04-26 02:47 KST`
+- flashed the currently ST-Link-connected board as `S02` again:
+  - `pio run -e custom_f446re_s02 -t upload`
+  - result: upload success, verify OK, target reset
+
+S02 upload with CAN FOC calibration command support:
+
+- test time: `2026-04-26 03:01 KST`
+- flashed the currently ST-Link-connected board as `S02`:
+  - `pio run -e custom_f446re_s02 -t upload`
+  - result: upload success, verify OK, target reset
+- firmware includes CAN FOC calibration command support:
+  - `0x290 + node_id`
+  - for S02/node `2`: `cansend can0 292#01`
+
+S02 CAN FOC calibration command:
+
+- test time: `2026-04-26 03:02 KST`
+- target: S02/node `2`
+- sent disarm/clear first:
+  - `cansend can0 232#00`
+- initial S02 diag before command:
+  - `FB0101011F000001`
+  - trusted FOC calibration valid
+  - trusted output calibration valid
+  - calibration load status `Trusted`
+  - runtime fault `0`
+  - `need_calibration = 0`
+  - `armed = 0`
+- sent CAN FOC calibration command:
+  - `cansend can0 292#01`
+- final S02 diag after command:
+  - `FB0101011F000001`
+  - trusted FOC calibration valid
+  - trusted output calibration valid
+  - calibration load status `Trusted`
+  - runtime fault `0`
+  - `need_calibration = 0`
+  - `armed = 0`
+- note:
+  - the current runtime diagnostic has no dedicated FOC-calibration-complete counter/ack
+  - because S02 already had `foc_valid = 1` before the command, the final diagnostic confirms healthy state but does not distinguish old vs newly written FOC data by itself
+
+S04 upload with CAN FOC calibration command support:
+
+- test time: `2026-04-26 03:04 KST`
+- flashed the currently ST-Link-connected board as `S04`:
+  - `pio run -e custom_f446re_s04 -t upload`
+  - result: upload success, verify OK, target reset
+- firmware includes CAN FOC calibration command support:
+  - `0x290 + node_id`
+  - for S04/node `4`: `cansend can0 294#01`
+
+S01 upload with CAN FOC calibration command support:
+
+- test time: `2026-04-26 03:06 KST`
+- flashed the currently ST-Link-connected board as `S01`:
+  - `pio run -e custom_f446re_s01 -t upload`
+  - result: upload success, verify OK, target reset
+- firmware includes CAN FOC calibration command support:
+  - `0x290 + node_id`
+  - for S01/node `1`: `cansend can0 291#01`
+
+S03 upload with CAN FOC calibration command support:
+
+- test time: `2026-04-26 03:07 KST`
+- flashed the currently ST-Link-connected board as `S03`:
+  - `pio run -e custom_f446re_s03 -t upload`
+  - result: upload success, verify OK, target reset
+- firmware includes CAN FOC calibration command support:
+  - `0x290 + node_id`
+  - for S03/node `3`: `cansend can0 293#01`
+
+S01-S04 AS5600 output-zero capture over CAN:
+
+- test time: `2026-04-26 03:13 KST`
+- CAN interface:
+  - brought `can0` up at `1000000` bps
+  - final state: `ERROR-ACTIVE`
+- disarmed all four boards before capture:
+  - `cansend can0 231#00`
+  - `cansend can0 232#00`
+  - `cansend can0 233#00`
+  - `cansend can0 234#00`
+- saved the current `AS5600` absolute angle as output `0 deg` for each board:
+  - S01/node `1`: `cansend can0 281#01`
+  - S02/node `2`: `cansend can0 282#01`
+  - S03/node `3`: `cansend can0 283#01`
+  - S04/node `4`: `cansend can0 284#01`
+- verification after capture:
+  - S01 angle status `0x401`: about `-0.003 deg`
+  - S02 angle status `0x402`: about `-0.001 deg`
+  - S03 angle status `0x403`: about `0.001 deg`
+  - S04 angle status `0x404`: about `0.002 deg`
+  - observed runtime diag for S01-S04: `FB0101011F000001`
+  - decoded diag: profile `As5600`, disarmed, trusted FOC valid, trusted output calibration valid, `need_calibration = 0`, runtime fault `0`
+- capture logs:
+  - `/tmp/s01_s04_as5600_zero_capture_20260426_031237.log`
+  - `/tmp/s01_s04_diag_after_zero_20260426_031309.log`
+
+S01-S04 CAN FOC calibration:
+
+- test time: `2026-04-26 03:15 KST`
+- CAN interface:
+  - `can0` was already up at `1000000` bps
+  - state before calibration: `ERROR-ACTIVE`
+- disarmed all four boards before calibration:
+  - `cansend can0 231#00`
+  - `cansend can0 232#00`
+  - `cansend can0 233#00`
+  - `cansend can0 234#00`
+- ran FOC calibration sequentially so the align motions did not overlap:
+  - S01/node `1`: `cansend can0 291#01`
+  - S02/node `2`: `cansend can0 292#01`
+  - S03/node `3`: `cansend can0 293#01`
+  - S04/node `4`: `cansend can0 294#01`
+- verification after calibration:
+  - S01 diag `FB0101011F000001`, angle about `-0.153 deg`, velocity about `0.026 deg/s`
+  - S02 diag `FB0101011F000001`, angle about `0.088 deg`, velocity about `0.018 deg/s`
+  - S03 diag `FB0101011F000001`, angle about `0.000 deg`, velocity about `0.009 deg/s`
+  - S04 diag `FB0101011F000001`, angle about `0.261 deg`, velocity about `-0.018 deg/s`
+  - decoded diag for all four boards: profile `As5600`, disarmed, trusted FOC valid, trusted output calibration valid, `need_calibration = 0`, runtime fault `0`
+  - no non-ready diagnostic samples were observed in the captured diagnostic frames
+- capture log:
+  - `/tmp/s01_s04_foc_cal_20260426_031445.log`
+
+S01-S04 simultaneous slow sweep with logging:
+
+- test time: `2026-04-26 03:22 KST`
+- ran a simultaneous output-angle sweep over CAN:
+  - disarm S01-S04
+  - preload and stream `+90 deg`
+  - arm S01-S04
+  - stream target at `20 Hz`
+  - path: `+90 -> -90 -> +90 deg`
+  - half sweep: `18 s` (`~10 deg/s` target slope)
+  - disarm after post-hold
+- generated files:
+  - [docs/s01_s04_sweep_log_20260426_032207.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/s01_s04_sweep_log_20260426_032207.csv)
+  - [docs/s01_s04_sweep_plot_20260426_032207.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/s01_s04_sweep_plot_20260426_032207.svg)
+  - [docs/s01_s04_sweep_candump_20260426_032207.log](/home/gyungminnoh/projects/NoFW/NoFW/docs/s01_s04_sweep_candump_20260426_032207.log)
+- measured summary:
+  - S01: `-88.371 .. 90.022 deg`, final `90.011 deg`, max `|velocity| = 26.376 deg/s`, fault samples `0`
+  - S02: `-88.242 .. 90.004 deg`, final `89.993 deg`, max `|velocity| = 22.869 deg/s`, fault samples `0`
+  - S03: `-88.232 .. 90.002 deg`, final `89.990 deg`, max `|velocity| = 23.247 deg/s`, fault samples `0`
+  - S04: `-88.236 .. 90.029 deg`, final `89.987 deg`, max `|velocity| = 23.388 deg/s`, fault samples `0`

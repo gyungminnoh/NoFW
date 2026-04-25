@@ -12,15 +12,18 @@ struct CalibrationBundle {
   TmagCalibrationData tmag = {};
 };
 
+enum class CalibrationLoadStatus : uint8_t {
+  None = 0,
+  Trusted = 1,
+};
+
 bool loadActuatorConfig(ActuatorConfig& out_config);
 bool saveActuatorConfig(const ActuatorConfig& config);
 
 bool loadCalibrationBundle(CalibrationBundle& out_bundle);
+bool loadCalibrationBundleWithStatus(CalibrationBundle& out_bundle,
+                                     CalibrationLoadStatus& out_status);
 bool saveCalibrationBundle(const CalibrationBundle& bundle);
 bool clearCalibrationBundle();
-
-bool loadCalibrationBundleCompat(CalibrationBundle& out_bundle);
-bool saveCalibrationBundleCompat(const CalibrationBundle& bundle);
-bool clearCalibrationBundleCompat();
 
 }  // namespace ConfigStore

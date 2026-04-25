@@ -7,6 +7,7 @@ STM32F446RE 기반의 그리퍼 펌웨어 프로젝트입니다.
 ## 구성 요약
 
 - 메인 제품 펌웨어: `src/main.cpp`
+- 사용자 facing 고정 스펙: `docs/user_facing_spec.md`
 - CAN 프로토콜 문서: `docs/can_protocol.md`
 - CAN 계층 구조 문서: `docs/can_arch.md`
 - 보드/핀/동작 상수: `include/board_config.h`
@@ -38,8 +39,8 @@ STM32F446RE 기반의 그리퍼 펌웨어 프로젝트입니다.
 메인 펌웨어의 부팅 순서는 대략 아래와 같습니다.
 
 1. SPI, CAN, 드라이버, 모터를 초기화합니다.
-2. 외장 SPI FRAM에서 모터 FOC 캘리브레이션 정보와 AS5600 기준값을 읽습니다.
-3. 필요하면 `initFOC()` 결과를 외장 SPI FRAM에 저장합니다.
+2. 외장 SPI FRAM의 trusted calibration slot에서 모터 FOC 캘리브레이션 정보와 AS5600 기준값을 읽습니다.
+3. trusted calibration이 없으면 `initFOC()`와 현재 출력축 기준값을 새 trusted slot에 저장합니다.
 4. 현재 모터 각도를 기준으로 multi-turn 추정을 리셋합니다.
 5. AS5600 절대각을 읽어 출력축 기준 0점을 정의합니다.
 6. 이후 `loop()`에서:
@@ -90,6 +91,34 @@ pio run -e tmag_lut_angle_test_f446re
 ```
 
 `pio run`만 실행하면 기본값으로 메인 펌웨어만 빌드됩니다. 평소 개발과 배포는 이 경로만 사용하면 됩니다.
+
+## 현재 운영 PID 값
+
+현재 steering 운영 기준 PID 값은 아래와 같습니다.
+
+- 적용 위치: [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+- `motor.PID_velocity.P = 0.12`
+- `motor.PID_velocity.I = 2.0`
+- `motor.PID_velocity.D = 0.0`
+- `pvc.Kp = 3.0`
+
+이 값은 2026-04-25 기준 `S01` 실기 재튜닝 후 유지하기로 결정한 설정입니다.
+큰 각도 이동에서도 불안정한 지속 발진은 보이지 않았고, 현재는 추가 조정 없이 이 값을 운영 기준으로 사용합니다.
+
+## FRAM calibration 저장 정책
+
+Actuator config는 현재 store version의 `ActuatorConfig`만 읽습니다.
+예전 config layout은 마이그레이션하지 않고, 읽기 실패 시 현재 펌웨어 build default로 새로 저장합니다.
+
+Calibration bundle은 FRAM의 두 fixed slot에 저장됩니다.
+
+- 각 slot은 `magic`, `version`, `sequence`, `crc32`, commit marker, payload를 포함합니다.
+- 저장할 때는 payload 전체를 먼저 쓰고, commit marker를 마지막에 씁니다.
+- 읽을 때는 header, commit marker, CRC, 각 calibration payload의 sanity check가 모두 통과한 최신 sequence만 사용합니다.
+- 예전 단일 calibration record는 더 이상 fallback으로 읽지 않습니다.
+
+따라서 이 정책이 적용된 펌웨어를 처음 올린 보드는 기존 FRAM의 예전 calibration 값을 무시합니다.
+보드별로 처음 `arm`할 때 FOC와 출력축 zero 기준을 다시 만들고 새 trusted slot에 저장해야 합니다.
 
 ## FRAM 진단 펌웨어
 

@@ -362,6 +362,7 @@ function renderState(state) {
   const diag = state.diag || {};
   const linkAlive = !!state.link_alive;
   const armed = !!diag.armed;
+  const faultActive = diag.fault && diag.fault !== "None";
   const angleEnabled = !!diag.enable_output_angle_mode;
   const velocityEnabled = !!diag.enable_velocity_mode;
   const activeProfile = diag.active_profile || null;
@@ -404,7 +405,10 @@ function renderState(state) {
   stateEls.needCalibration.textContent = fmtBool(diag.need_calibration);
   stateEls.profileResult.textContent = diag.profile_select_result || "-";
   stateEls.armedState.textContent = fmtBool(diag.armed);
-  stateEls.diagRaw.textContent = diag.raw_hex || "-";
+  stateEls.diagRaw.textContent =
+    `${diag.raw_hex || "-"}\n` +
+    `fault=${diag.fault || "-"}, cal=${diag.calibration_load_status || "-"}, ` +
+    `foc=${fmtBool(diag.foc_valid)}, output=${fmtBool(diag.output_cal_valid)}`;
   stateEls.actuatorConfigRaw.textContent =
     `limits 0x${(0x420 + state.session.node_id).toString(16).toUpperCase()}: ${limits.raw_hex || "-"}\n` +
     `config 0x${(0x430 + state.session.node_id).toString(16).toUpperCase()}: ${config.raw_hex || "-"}`;
@@ -413,13 +417,13 @@ function renderState(state) {
   setButtonEnabled(controls.applySessionBtn, true);
   setButtonEnabled(
     controls.armBtn,
-    linkAlive && !armed,
-    !linkAlive ? "No live CAN frames" : "Already armed"
+    linkAlive && !armed && !faultActive,
+    !linkAlive ? "No live CAN frames" : faultActive ? "Clear fault with disarm first" : "Already armed"
   );
   setButtonEnabled(
     controls.disarmBtn,
-    linkAlive && armed,
-    !linkAlive ? "No live CAN frames" : "Already disarmed"
+    linkAlive && (armed || faultActive),
+    !linkAlive ? "No live CAN frames" : faultActive ? "Clear fault" : "Already disarmed"
   );
   setButtonEnabled(
     controls.sendAngleBtn,

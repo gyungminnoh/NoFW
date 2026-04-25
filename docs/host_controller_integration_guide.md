@@ -146,9 +146,13 @@
 주의:
 
 - 부팅 시 펌웨어는 FRAM에 저장된 `can_node_id`를 검사하고,
-  값이 현재 빌드의 `CAN_NODE_ID`와 다르면 FRAM 값을 펌웨어 값으로 갱신한다.
-- 따라서 상위 제어기는 "현재 설치된 펌웨어 빌드의 node_id가 최종적으로 적용된다"는 전제로 운용해야 한다.
+  값이 현재 빌드 env의 `BUILD_CAN_NODE_ID`와 다르면 FRAM 값을 env 값으로 갱신한다.
+- 따라서 상위 제어기는 "현재 설치된 펌웨어 env의 node_id가 최종적으로 적용된다"는 전제로 운용해야 한다.
 - 여러 보드 배포 절차는 [can_node_id_provisioning.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_node_id_provisioning.md)를 참고한다.
+- `ActuatorConfig`는 현재 store version만 읽고, 예전 config layout은 migration하지 않는다.
+  읽기 실패 시 현재 firmware default가 새로 저장된다.
+- calibration bundle은 CRC/commit marker가 있는 trusted slot만 읽는다.
+  예전 단일 calibration record는 fallback으로 사용하지 않는다.
 
 ## 4. 상위 제어기 상태기계에서 꼭 가져가야 하는 개념
 
@@ -349,8 +353,12 @@ power-stage command:
 
 - `data[1]` = stored profile
 - `data[2]` = active profile
-- `data[4]` = velocity mode enable
-- `data[5]` = angle mode enable
+- `data[4]` bit0 = velocity mode enable
+- `data[4]` bit1 = angle mode enable
+- `data[4]` bit2 = trusted FOC calibration valid
+- `data[4]` bit3 = trusted output calibration valid
+- `data[4]` bits4..5 = calibration load status (`0` none, `1` trusted)
+- `data[5]` = runtime fault (`0` none)
 - `data[6]` bit0 = need_calibration
 - `data[6]` bits4..7 = last profile-select result
 - `data[7] bit1` = power stage armed
@@ -508,6 +516,27 @@ cansend can0 277#01
 - 이 명령은 짧지만 실제 모터를 움직인다
 - 현재 펌웨어는 별도 성공/실패 ack frame을 보내지 않는다
 - 상위 제어기는 명령 후 `0x407`, `0x417`, `0x5F7`를 보고 움직임과 disarm 복귀를 확인해야 한다
+
+### 10.5 AS5600 현재각 zero 저장
+
+명령:
+
+- ID: `0x280 + node_id`
+- 기본 node `7`: `0x287`
+- payload:
+  - `data[0] = 1` for `As5600`
+
+예:
+
+```bash
+cansend can0 287#01
+```
+
+의미:
+
+- 현재 읽힌 `AS5600` 절대각을 출력축 `0 deg` 기준으로 저장한다
+- 저장 즉시 boot reference를 다시 잡는다
+- power stage가 `disarmed` 상태여야 한다
 
 ## 11. 상위 제어기에서 권장하는 최소 통합 절차
 

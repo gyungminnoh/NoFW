@@ -44,6 +44,17 @@ PROFILE_SELECT_RESULT_NAMES = {
     4: "NotSelectable",
     5: "SaveFailed",
 }
+RUNTIME_FAULT_NAMES = {
+    0: "None",
+    1: "FollowingError",
+    2: "FocInitFailed",
+    3: "As5600ReadFailed",
+    4: "CalibrationSaveFailed",
+}
+CALIBRATION_LOAD_STATUS_NAMES = {
+    0: "None",
+    1: "Trusted",
+}
 
 FRAME_RE = re.compile(
     r"^(?:\((?P<timestamp>[0-9.]+)\)\s+)?"
@@ -138,6 +149,9 @@ def decode_diag(payload_hex: str) -> dict[str, Any]:
         raise ValueError(f"runtime diag magic mismatch: 0x{data[0]:02X}")
     select_bits = data[6]
     flags = data[7]
+    status_flags = data[4]
+    fault_code = data[5]
+    calibration_status_code = (status_flags >> 4) & 0x03
     return {
         "magic": data[0],
         "stored_profile_code": data[1],
@@ -146,8 +160,16 @@ def decode_diag(payload_hex: str) -> dict[str, Any]:
         "active_profile": PROFILE_NAMES.get(data[2], f"Unknown({data[2]})"),
         "default_control_mode_code": data[3],
         "default_control_mode": CONTROL_MODE_NAMES.get(data[3], f"Unknown({data[3]})"),
-        "enable_velocity_mode": bool(data[4]),
-        "enable_output_angle_mode": bool(data[5]),
+        "enable_velocity_mode": bool(status_flags & 0x01),
+        "enable_output_angle_mode": bool(status_flags & 0x02),
+        "foc_valid": bool(status_flags & 0x04),
+        "output_cal_valid": bool(status_flags & 0x08),
+        "calibration_load_status_code": calibration_status_code,
+        "calibration_load_status": CALIBRATION_LOAD_STATUS_NAMES.get(
+            calibration_status_code, f"Unknown({calibration_status_code})"
+        ),
+        "fault_code": fault_code,
+        "fault": RUNTIME_FAULT_NAMES.get(fault_code, f"Unknown({fault_code})"),
         "need_calibration": bool(select_bits & 0x01),
         "profile_select_result_code": (select_bits >> 4) & 0x0F,
         "profile_select_result": PROFILE_SELECT_RESULT_NAMES.get(
@@ -218,6 +240,8 @@ class CanSession:
             "gear_cmd": frame_id(0x250, node),
             "encoder_config_cmd": frame_id(0x260, node),
             "encoder_auto_cal_cmd": frame_id(0x270, node),
+            "encoder_zero_cmd": frame_id(0x280, node),
+            "foc_cal_cmd": frame_id(0x290, node),
             "diag": frame_id(0x5F0, node),
         }
 
@@ -400,6 +424,8 @@ class SpecRunner:
             "gear_cmd": 0x250 + node,
             "encoder_config_cmd": 0x260 + node,
             "encoder_auto_cal_cmd": 0x270 + node,
+            "encoder_zero_cmd": 0x280 + node,
+            "foc_cal_cmd": 0x290 + node,
             "diag": 0x5F0 + node,
         }
         for name, can_id in expected.items():
@@ -436,13 +462,17 @@ class SpecRunner:
         return "candump -L format accepted"
 
     def _test_diag_decoder(self) -> str:
-        diag = decode_diag("FB01010101010001")
+        diag = decode_diag("FB0101011F000001")
         if diag["stored_profile"] != "As5600" or diag["active_profile"] != "As5600":
             raise AssertionError(diag)
         if diag["armed"]:
             raise AssertionError("expected disarmed")
-        diag = decode_diag("FB01010101000303")
+        if not diag["foc_valid"] or not diag["output_cal_valid"]:
+            raise AssertionError(diag)
+        diag = decode_diag("FB01010100010303")
         if not diag["need_calibration"] or not diag["armed"]:
+            raise AssertionError(diag)
+        if diag["fault"] != "FollowingError":
             raise AssertionError(diag)
         return "0x5F0 payload decoded"
 

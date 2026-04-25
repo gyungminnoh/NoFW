@@ -2,7 +2,7 @@
 
 #include "config/actuator_config.h"
 
-ActuatorConfig buildLegacyActuatorConfig();
+ActuatorConfig buildDefaultActuatorConfig();
 void applyOutputProfileDefaults(ActuatorConfig& config, OutputEncoderType profile);
 bool isDirectInputCompatible(const ActuatorConfig& config);
-bool migrateStaleActuatorConfigDefaults(ActuatorConfig& config);
+bool syncActuatorConfigToFirmwareDefaults(ActuatorConfig& config);

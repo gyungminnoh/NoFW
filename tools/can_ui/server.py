@@ -36,6 +36,17 @@ PROFILE_SELECT_RESULT_NAMES = {
     4: "NotSelectable",
     5: "SaveFailed",
 }
+RUNTIME_FAULT_NAMES = {
+    0: "None",
+    1: "FollowingError",
+    2: "FocInitFailed",
+    3: "As5600ReadFailed",
+    4: "CalibrationSaveFailed",
+}
+CALIBRATION_LOAD_STATUS_NAMES = {
+    0: "None",
+    1: "Trusted",
+}
 
 FRAME_RE = re.compile(
     r"^(?:\((?P<timestamp>[0-9.]+)\)\s+)?"
@@ -329,7 +340,10 @@ class CanUiBridge:
             return {"raw_hex": payload_hex}
         flags = data[7]
         need_and_profile = data[6]
+        status_flags = data[4]
+        fault_code = data[5]
         profile_result_code = (need_and_profile >> 4) & 0x0F
+        calibration_status_code = (status_flags >> 4) & 0x03
         return {
             "magic": data[0],
             "stored_profile_code": data[1],
@@ -340,8 +354,16 @@ class CanUiBridge:
             "default_control_mode": CONTROL_MODE_NAMES.get(
                 data[3], f"Unknown({data[3]})"
             ),
-            "enable_velocity_mode": bool(data[4]),
-            "enable_output_angle_mode": bool(data[5]),
+            "enable_velocity_mode": bool(status_flags & 0x01),
+            "enable_output_angle_mode": bool(status_flags & 0x02),
+            "foc_valid": bool(status_flags & 0x04),
+            "output_cal_valid": bool(status_flags & 0x08),
+            "calibration_load_status_code": calibration_status_code,
+            "calibration_load_status": CALIBRATION_LOAD_STATUS_NAMES.get(
+                calibration_status_code, f"Unknown({calibration_status_code})"
+            ),
+            "fault_code": fault_code,
+            "fault": RUNTIME_FAULT_NAMES.get(fault_code, f"Unknown({fault_code})"),
             "need_calibration": bool(need_and_profile & 0x01),
             "profile_select_result_code": profile_result_code,
             "profile_select_result": PROFILE_SELECT_RESULT_NAMES.get(

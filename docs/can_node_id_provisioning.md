@@ -6,10 +6,28 @@
 현재 펌웨어 정책:
 
 - `node_id`는 런타임 CAN 명령으로 바꾸지 않는다
-- 빌드에 포함된 `CAN_NODE_ID`가 최종 값이다
-- 부팅 시 FRAM에 저장된 `can_node_id`가 펌웨어 값과 다르면 펌웨어 값으로 덮어쓴다
+- 빌드 env가 주입한 `BUILD_CAN_NODE_ID`가 최종 값이다
+- 부팅 시 FRAM에 저장된 `can_node_id`가 env 값과 다르면 env 값으로 덮어쓴다
 
-즉 보드별 `node_id`를 나누려면 보드별로 다른 `CAN_NODE_ID`로 빌드/업로드하면 된다.
+즉 보드별 `node_id`를 나누려면 보드별로 다른 PlatformIO env로 빌드/업로드하면 된다.
+
+현재 표준 env:
+
+- steering
+  - `S01`: `custom_f446re_s01` -> node `1`
+  - `S02`: `custom_f446re_s02` -> node `2`
+  - `S03`: `custom_f446re_s03` -> node `3`
+  - `S04`: `custom_f446re_s04` -> node `4`
+- driving
+  - `D01`: `custom_f446re_d01` -> node `5`
+  - `D02`: `custom_f446re_d02` -> node `6`
+  - `D03`: `custom_f446re_d03` -> node `7`
+  - `D04`: `custom_f446re_d04` -> node `8`
+
+주의:
+
+- user-facing spec `1.0.0`은 steering node `1..4`와 driving node `5..8`을 release한다.
+- 현재 frame family는 function base가 `0x10` 간격이므로 같은 bus의 release node ID는 `1..15` 범위 안에서 관리한다.
 
 현재 계획된 `9`개 보드의 실제 배포 표는
 [board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md)에 정리한다.
@@ -34,14 +52,16 @@
 
 ## 2. 보드별 빌드 값 설정
 
-`CAN_NODE_ID`는 다음 파일에서 바꾼다.
-
-- [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h:57)
+`node_id`는 `platformio.ini`의 보드별 env가 단일 원본이다.
 
 예:
 
-```cpp
-static constexpr uint8_t  CAN_NODE_ID = 8;
+```ini
+[env:custom_f446re_d03]
+extends = env:custom_f446re_base
+build_flags =
+  ${env:custom_f446re_base.build_flags}
+  -D BUILD_CAN_NODE_ID=7
 ```
 
 ## 3. 업로드
@@ -49,13 +69,13 @@ static constexpr uint8_t  CAN_NODE_ID = 8;
 메인 펌웨어 업로드:
 
 ```bash
-pio run -e custom_f446re -t upload
+pio run -e custom_f446re_d03 -t upload
 ```
 
 중요:
 
-- 이 업로드가 끝나면 부팅 과정에서 FRAM 안의 저장된 `can_node_id`도 같은 값으로 자동 동기화된다
-- 즉 과거에 다른 ID가 저장되어 있었더라도, 현재 펌웨어 ID가 최종적으로 적용된다
+- 이 업로드가 끝나면 부팅 과정에서 FRAM 안의 저장된 `can_node_id`도 같은 env 값으로 자동 정리된다
+- 즉 과거에 다른 ID가 저장되어 있었더라도, 현재 업로드한 env 값이 최종적으로 적용된다
 
 ## 4. 업로드 후 검증
 
@@ -92,7 +112,7 @@ candump can0
 
 1. 대상 보드 라벨을 확인한다.
 2. 할당표에서 해당 보드의 `node_id`를 확인한다.
-3. `include/board_config.h`의 `CAN_NODE_ID`를 그 값으로 바꾼다.
+3. 대상 보드 env를 선택한다.
 4. 펌웨어를 빌드하고 업로드한다.
 5. `candump`로 기대한 상태 프레임 ID가 나오는지 확인한다.
 6. 보드 라벨과 검증 결과를 배포 기록에 남긴다.

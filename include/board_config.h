@@ -35,7 +35,7 @@ static constexpr float ALIGN_VOLTAGE  = 1.0f;
 
 // =================== Gear ratio ===================
 // motor_angle_rad = output_angle_rad * GEAR_RATIO
-static constexpr float GEAR_RATIO = 8.0f;
+static constexpr float GEAR_RATIO = 50.0f;
 
 // =================== Actuator travel ===================
 // Motor shaft max travel, in turns.
@@ -47,11 +47,20 @@ static constexpr float ACTUATOR_OUTPUT_MAX_RAD = ACTUATOR_MOTOR_MAX_RAD / GEAR_R
 // Output angle range in degrees (output shaft reference).
 static constexpr float ACTUATOR_OUTPUT_MAX_DEG =
     ACTUATOR_OUTPUT_MAX_RAD * (180.0f / 3.1415926f);
+// Default deployed travel limits for this board build.
+static constexpr float ACTUATOR_OUTPUT_DEFAULT_MIN_DEG = -120.0f;
+static constexpr float ACTUATOR_OUTPUT_DEFAULT_MAX_DEG = 120.0f;
 // =================== CAN (CONFIRMED) ===================
 static constexpr uint32_t CAN_BITRATE    = 1000000; // 1 Mbps
 static constexpr uint32_t CAN_TIMEOUT_MS = 100;
 static constexpr uint32_t CAN_STATUS_TX_MS  = 50; // Status report period (0=disable)
-static constexpr uint8_t  CAN_NODE_ID    = 7;
+#ifndef BUILD_CAN_NODE_ID
+#error "BUILD_CAN_NODE_ID must be defined by the selected PlatformIO environment"
+#endif
+static_assert(BUILD_CAN_NODE_ID >= 0 && BUILD_CAN_NODE_ID <= 127,
+              "BUILD_CAN_NODE_ID must fit in 11-bit standard CAN node range");
+// Single source of truth: select the PlatformIO environment for the target board.
+static constexpr uint8_t  CAN_NODE_ID    = static_cast<uint8_t>(BUILD_CAN_NODE_ID);
 
 // Actuator CAN ID base (11-bit standard)
 static constexpr uint16_t CAN_ID_OUTPUT_ANGLE_CMD_BASE = 0x200;
@@ -66,6 +75,8 @@ static constexpr uint16_t CAN_ID_ACTUATOR_LIMITS_CONFIG_CMD_BASE = 0x240;
 static constexpr uint16_t CAN_ID_ACTUATOR_GEAR_CONFIG_CMD_BASE = 0x250;
 static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_CONFIG_CMD_BASE = 0x260;
 static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_AUTO_CAL_CMD_BASE = 0x270;
+static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_ZERO_CMD_BASE = 0x280;
+static constexpr uint16_t CAN_ID_FOC_CALIBRATION_CMD_BASE = 0x290;
 
 // CAN uses the board's default CAN1 pin mapping provided by the STM32 core.
 // Transceiver: SN65HVD230 (no SW control unless STB/RS wired to MCU)
@@ -76,7 +87,7 @@ static constexpr uint8_t PIN_USER_BTN = PC13;
 // =================== Torque limit ===================
 // SimpleFOC torque limit via voltage (tune to prevent overheating).
 // Set lower than VOLTAGE_LIMIT to reduce torque.
-static constexpr float TORQUE_LIMIT_VOLTS = 40.0f;
+static constexpr float TORQUE_LIMIT_VOLTS = 12.0f;
 
 // =================== Motion limits ===================
 // These limits are defined on the motor shaft side. Output-side limits are
@@ -99,3 +110,10 @@ static constexpr float ACTUATOR_OUTPUT_EDGE_BRAKE_DEG_S2 = 60.0f;
 // reversals or deceleration spikes that can otherwise create strong
 // regenerative braking near the travel edges.
 static constexpr float ACTUATOR_OUTPUT_ANGLE_MODE_SLEW_DEG_S2 = 300.0f;
+
+// Following-error protection. If the actuator is commanded hard but the output
+// angle does not move enough for this long, the power stage is fault-disarmed.
+static constexpr float ACTUATOR_FOLLOWING_ERROR_FAULT_DEG = 30.0f;
+static constexpr float ACTUATOR_FOLLOWING_ERROR_LOW_VEL_DEG_S = 5.0f;
+static constexpr float ACTUATOR_FOLLOWING_ERROR_MIN_CMD_DEG_S = 10.0f;
+static constexpr uint32_t ACTUATOR_FOLLOWING_ERROR_FAULT_MS = 1500;

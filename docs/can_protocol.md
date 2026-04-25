@@ -35,6 +35,7 @@
 - power-stage arm/disarm RX: `0x230 + node_id`
 - actuator travel limit 설정 RX: `0x240 + node_id`
 - actuator gear ratio 설정 RX: `0x250 + node_id`
+- FOC calibration RX: `0x290 + node_id`
 - 런타임 진단 TX: `0x5F0 + node_id`
 
 기본 `node_id = 7`이면:
@@ -49,6 +50,7 @@
 - power-stage cmd = `0x237`
 - actuator limits config cmd = `0x247`
 - actuator gear config cmd = `0x257`
+- FOC calibration cmd = `0x297`
 - runtime diag = `0x5F7`
 
 ## Numeric Encoding
@@ -307,6 +309,43 @@ cansend can0 257#401F0000
 
 적용 후에는 `0x437`에서 저장/적용된 gear ratio를 확인한다.
 
+## FOC Calibration Command
+
+- ID: `0x290 + node_id`
+- 기본 node `7`이면 `0x297`
+- DLC: `1`
+- 의미: 저장된 FOC 값을 무시하고 `initFOC()`를 새로 수행한 뒤 trusted calibration slot에 저장
+- 적용 조건: power stage가 `disarmed` 상태일 때만 적용
+
+Payload:
+
+- `data[0] = 1`
+
+동작:
+
+1. 펌웨어가 잠시 power stage를 enable한다.
+2. 기존 FOC calibration을 재사용하지 않고 `sensor_direction = UNKNOWN`, `zero_electric_angle = NOT_SET`에서 `initFOC()`를 실행한다.
+3. 성공하면 새 `sensor_direction`, `zero_electric_angle`을 FRAM trusted calibration slot에 저장한다.
+4. 명령 종료 후 power stage를 다시 disarm한다.
+
+이 명령은 FOC calibration만 갱신한다.
+출력축 zero, AS5600 invert, profile, travel limits, gear ratio, node ID는 변경하지 않는다.
+
+예시:
+
+```bash
+# node 7 FOC calibration
+cansend can0 297#01
+```
+
+성공 여부는 runtime diagnostic `0x5F0 + node_id`에서 확인한다.
+
+- `data[4] bit2 = 1`: trusted FOC calibration valid
+- `data[5] = 0`: runtime fault 없음
+- `data[7] bit1 = 0`: 명령 종료 후 disarmed
+
+출력축 calibration이 별도로 없으면 FOC 성공 후에도 `need_calibration`은 계속 `1`일 수 있다.
+
 ## Output Encoder Config Command
 
 - ID: `0x260 + node_id`
@@ -368,6 +407,33 @@ Payload:
 cansend can0 277#01
 ```
 
+## Output Encoder Zero Capture Command
+
+- ID: `0x280 + node_id`
+- DLC: `1`
+- 의미: 현재 `AS5600` 절대각을 출력축 `0 deg` 기준으로 `FRAM`에 저장하고 boot reference를 다시 잡는다
+- 적용 조건:
+  - power stage가 `disarmed` 상태일 때만 적용
+  - 현재 profile이 `As5600`
+
+Payload:
+
+- `data[0] = output_encoder_type`
+  - `1` = `As5600`
+
+동작:
+
+1. 현재 `AS5600` 절대각을 읽는다.
+2. 그 각도를 `zero_offset_rad`로 `FRAM`에 저장한다.
+3. 출력축 기준과 boot reference를 즉시 다시 잡는다.
+
+예시:
+
+```bash
+# 현재 AS5600 각도를 output 0 deg로 저장
+cansend can0 287#01
+```
+
 ## Runtime Diagnostic
 
 - ID: `0x5F0 + node_id`
@@ -380,8 +446,13 @@ Payload:
 - `data[1] = stored output_encoder_type`
 - `data[2] = active output_encoder_type`
 - `data[3] = default_control_mode`
-- `data[4] = enable_velocity_mode`
-- `data[5] = enable_output_angle_mode`
+- `data[4]` bitfield:
+  - bit0 = `enable_velocity_mode`
+  - bit1 = `enable_output_angle_mode`
+  - bit2 = trusted FOC calibration valid
+  - bit3 = trusted output calibration valid for current profile
+  - bits4..5 = calibration load status (`0` = none, `1` = trusted CRC/commit slot)
+- `data[5] = runtime_fault`
 - `data[6]` bitfield:
   - bit0 = `need_calibration`
   - bits4..7 = last profile-select result
@@ -398,14 +469,26 @@ Profile-select result:
 - `4` = `NotSelectable`
 - `5` = `SaveFailed`
 
+Runtime fault:
+
+- `0` = `None`
+- `1` = `FollowingError`
+- `2` = `FocInitFailed`
+- `3` = `As5600ReadFailed`
+- `4` = `CalibrationSaveFailed`
+
 예시:
 
-- `FB 02 02 01 01 01 00 01`
+- `FB 02 02 01 1F 00 00 01`
   - stored profile = `TmagLut`
   - active profile = `TmagLut`
   - default control mode = `OutputAngle`
   - velocity mode enabled = `1`
   - angle mode enabled = `1`
+  - trusted FOC calibration valid = `1`
+  - trusted output calibration valid = `1`
+  - calibration load status = `Trusted`
+  - runtime fault = `None`
   - calibration blocking = `0`
   - last profile-select result = `None`
   - output feedback required = `1`
@@ -417,6 +500,10 @@ Profile-select result:
   - default control mode = `OutputVelocity`
   - velocity mode enabled = `1`
   - angle mode enabled = `0`
+  - trusted FOC calibration valid = `0`
+  - trusted output calibration valid = `0`
+  - calibration load status = `None`
+  - runtime fault = `None`
   - calibration blocking = `0`
   - last profile-select result = `None`
   - output feedback required = `0`

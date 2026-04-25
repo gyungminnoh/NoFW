@@ -16,4 +16,6 @@ namespace CanService {
   bool takePendingOutputEncoderConfig(OutputEncoderType& out_encoder_type,
                                       bool& out_invert);
   bool takePendingOutputEncoderAutoCalibration(OutputEncoderType& out_encoder_type);
+  bool takePendingOutputEncoderZeroCapture(OutputEncoderType& out_encoder_type);
+  bool takePendingFocCalibration();
 }

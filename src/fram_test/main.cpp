@@ -98,7 +98,7 @@ void setup() {
   FM25CL64B::begin();
   CanTransport::begin1Mbps();
   g_result = FramSelfTest::run();
-  g_bundle_loaded = ConfigStore::loadCalibrationBundleCompat(g_bundle);
+  g_bundle_loaded = ConfigStore::loadCalibrationBundle(g_bundle);
 }
 
 void loop() {
