@@ -28,14 +28,23 @@ static constexpr uint8_t PIN_I2C_SDA = PB9;
 static constexpr bool AS5048A_INVERT = true; // Invert direction to match motor wiring
 
 // =================== Motor / power ===================
-static constexpr int   POLE_PAIRS     = 14;
+#ifndef BUILD_POLE_PAIRS
+#define BUILD_POLE_PAIRS 14
+#endif
+static constexpr int   POLE_PAIRS     = BUILD_POLE_PAIRS;
 static constexpr float BUS_VOLTAGE    = 40.0f;
 static constexpr float VOLTAGE_LIMIT  = 40.0f;
-static constexpr float ALIGN_VOLTAGE  = 1.0f;
+#ifndef BUILD_ALIGN_VOLTAGE
+#define BUILD_ALIGN_VOLTAGE 1.0f
+#endif
+static constexpr float ALIGN_VOLTAGE  = BUILD_ALIGN_VOLTAGE;
 
 // =================== Gear ratio ===================
 // motor_angle_rad = output_angle_rad * GEAR_RATIO
-static constexpr float GEAR_RATIO = 50.0f;
+#ifndef BUILD_GEAR_RATIO
+#define BUILD_GEAR_RATIO 50.0f
+#endif
+static constexpr float GEAR_RATIO = BUILD_GEAR_RATIO;
 
 // =================== Actuator travel ===================
 // Motor shaft max travel, in turns.
@@ -87,7 +96,33 @@ static constexpr uint8_t PIN_USER_BTN = PC13;
 // =================== Torque limit ===================
 // SimpleFOC torque limit via voltage (tune to prevent overheating).
 // Set lower than VOLTAGE_LIMIT to reduce torque.
-static constexpr float TORQUE_LIMIT_VOLTS = 12.0f;
+#ifndef BUILD_TORQUE_LIMIT_VOLTS
+#define BUILD_TORQUE_LIMIT_VOLTS 12.0f
+#endif
+static constexpr float TORQUE_LIMIT_VOLTS = BUILD_TORQUE_LIMIT_VOLTS;
+
+// =================== Control gains ===================
+#ifndef BUILD_MOTOR_VELOCITY_PID_P
+#define BUILD_MOTOR_VELOCITY_PID_P 0.12f
+#endif
+#ifndef BUILD_MOTOR_VELOCITY_PID_I
+#define BUILD_MOTOR_VELOCITY_PID_I 2.0f
+#endif
+#ifndef BUILD_MOTOR_VELOCITY_PID_D
+#define BUILD_MOTOR_VELOCITY_PID_D 0.0f
+#endif
+#ifndef BUILD_MOTOR_VELOCITY_LPF_TF
+#define BUILD_MOTOR_VELOCITY_LPF_TF 0.007f
+#endif
+#ifndef BUILD_OUTER_ANGLE_KP
+#define BUILD_OUTER_ANGLE_KP 3.0f
+#endif
+
+static constexpr float MOTOR_VELOCITY_PID_P = BUILD_MOTOR_VELOCITY_PID_P;
+static constexpr float MOTOR_VELOCITY_PID_I = BUILD_MOTOR_VELOCITY_PID_I;
+static constexpr float MOTOR_VELOCITY_PID_D = BUILD_MOTOR_VELOCITY_PID_D;
+static constexpr float MOTOR_VELOCITY_LPF_TF = BUILD_MOTOR_VELOCITY_LPF_TF;
+static constexpr float OUTER_ANGLE_KP = BUILD_OUTER_ANGLE_KP;
 
 // =================== Motion limits ===================
 // These limits are defined on the motor shaft side. Output-side limits are

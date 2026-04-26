@@ -38,6 +38,8 @@ void applyOutputProfileDefaults(ActuatorConfig& cfg, OutputEncoderType profile) 
   switch (profile) {
     case OutputEncoderType::VelocityOnly:
       cfg.default_control_mode = ControlMode::OutputVelocity;
+      cfg.output_min_deg = 0.0f;
+      cfg.output_max_deg = 0.0f;
       cfg.enable_velocity_mode = true;
       cfg.enable_output_angle_mode = false;
       break;
@@ -46,6 +48,8 @@ void applyOutputProfileDefaults(ActuatorConfig& cfg, OutputEncoderType profile) 
     case OutputEncoderType::As5600:
     case OutputEncoderType::TmagLut:
       cfg.default_control_mode = ControlMode::OutputAngle;
+      cfg.output_min_deg = kFirmwareDefaultOutputMinDeg;
+      cfg.output_max_deg = kFirmwareDefaultOutputMaxDeg;
       cfg.enable_velocity_mode = true;
       cfg.enable_output_angle_mode = true;
       break;
@@ -61,9 +65,11 @@ ActuatorConfig buildDefaultActuatorConfig() {
   cfg.output_max_deg = kFirmwareDefaultOutputMaxDeg;
   cfg.can_node_id = CAN_NODE_ID;
 
+#ifndef BUILD_DEFAULT_OUTPUT_ENCODER_TYPE
+#define BUILD_DEFAULT_OUTPUT_ENCODER_TYPE 1
+#endif
   const OutputEncoderType default_profile =
-      (GEAR_RATIO <= 1.0f) ? OutputEncoderType::DirectInput
-                           : OutputEncoderType::As5600;
+      static_cast<OutputEncoderType>(BUILD_DEFAULT_OUTPUT_ENCODER_TYPE);
   applyOutputProfileDefaults(cfg, default_profile);
 
   return cfg;

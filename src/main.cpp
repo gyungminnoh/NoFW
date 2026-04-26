@@ -205,6 +205,10 @@ bool validTravelLimits(float output_min_deg, float output_max_deg) {
          output_max_deg > output_min_deg;
 }
 
+bool travelLimitsConfigurable(const ActuatorConfig& config) {
+  return config.output_encoder_type != OutputEncoderType::VelocityOnly;
+}
+
 bool validGearRatio(float gear_ratio) {
   return isfinite(gear_ratio) &&
          gear_ratio >= kMinGearRatio &&
@@ -306,17 +310,19 @@ void sendRuntimeDiagIfDue() {
   }
   CanTransport::sendStd(runtimeDiagCanId(), data, 8);
 
-  uint8_t limits_data[8] = {0};
-  uint8_t limits_len = 0;
-  if (CanProtocol::encodeActuatorLimitsStatus_OptionA(
-          actuator_config.output_min_deg,
-          actuator_config.output_max_deg,
+  if (travelLimitsConfigurable(actuator_config)) {
+    uint8_t limits_data[8] = {0};
+    uint8_t limits_len = 0;
+    if (CanProtocol::encodeActuatorLimitsStatus_OptionA(
+            actuator_config.output_min_deg,
+            actuator_config.output_max_deg,
+            limits_data,
+            limits_len)) {
+      CanTransport::sendStd(
+          CanProtocol::actuatorLimitsStatusCanId(actuator_config.can_node_id),
           limits_data,
-          limits_len)) {
-    CanTransport::sendStd(
-        CanProtocol::actuatorLimitsStatusCanId(actuator_config.can_node_id),
-        limits_data,
-        limits_len);
+          limits_len);
+    }
   }
 
   uint8_t config_data[8] = {0};
@@ -385,7 +391,9 @@ void reconfigureRuntimeAfterActuatorConfigChange(float current_motor_mt_rad,
 bool applyActuatorLimitsConfig(float output_min_deg,
                                float output_max_deg,
                                float current_motor_mt_rad) {
-  if (g_power_stage_armed || !validTravelLimits(output_min_deg, output_max_deg)) {
+  if (g_power_stage_armed ||
+      !travelLimitsConfigurable(actuator_config) ||
+      !validTravelLimits(output_min_deg, output_max_deg)) {
     return false;
   }
 
@@ -1025,14 +1033,15 @@ static void initSystem() {
   // Inner loop = velocity, outer loop makes velocity cmd
   motor.controller        = MotionControlType::velocity;
   motor.torque_controller = TorqueControlType::voltage;
+  motor.foc_modulation    = FOCModulationType::SpaceVectorPWM;
 
   motor.voltage_sensor_align = ALIGN_VOLTAGE;
   motor.voltage_limit        = (TORQUE_LIMIT_VOLTS < VOLTAGE_LIMIT) ? TORQUE_LIMIT_VOLTS : VOLTAGE_LIMIT;
 
-  motor.PID_velocity.P = 0.12;
-  motor.PID_velocity.I = 2.0;
-  motor.PID_velocity.D = 0.0;
-  motor.LPF_velocity.Tf = 0.007;
+  motor.PID_velocity.P = MOTOR_VELOCITY_PID_P;
+  motor.PID_velocity.I = MOTOR_VELOCITY_PID_I;
+  motor.PID_velocity.D = MOTOR_VELOCITY_PID_D;
+  motor.LPF_velocity.Tf = MOTOR_VELOCITY_LPF_TF;
   motor.velocity_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
 
   // ---------- Calibration gate ----------
@@ -1070,7 +1079,7 @@ static void initSystem() {
   disarmPowerStage();
 
   // Outer loop gains (tune)
-  pvc.Kp = 3.00f;
+  pvc.Kp = OUTER_ANGLE_KP;
   pvc.vel_limit = ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S;
   pvc.accel_limit = ACTUATOR_MOTOR_ACCEL_LIMIT_RAD_S2;
   pvc.reset();

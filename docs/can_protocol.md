@@ -142,6 +142,7 @@ motor multi-turn 추정값의 시간차로 계산한 출력축 속도다.
 - DLC: `8`
 - 의미: 현재 펌웨어가 사용하는 출력축 travel limit
 - 송신 주기: runtime diagnostic과 동일하게 기본 `500 ms`
+- `VelocityOnly` profile에서는 travel limit 기능이 없으므로 이 status를 송신하지 않는다.
 
 Payload:
 
@@ -257,6 +258,7 @@ cansend can0 237#00
 - DLC: `8`
 - 의미: `output_min_deg`, `output_max_deg`를 `FRAM`에 저장하고 런타임 설정에 적용
 - 적용 조건: power stage가 `disarmed` 상태일 때만 적용
+- `VelocityOnly` profile에서는 travel limit 기능이 없으므로 이 command는 적용되지 않는다.
 
 Payload:
 

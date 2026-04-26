@@ -1,0 +1,23 @@
+D02 torque-limit-40V response check
+time=2026-04-26 20:20:29 KST
+config_hex=5014000000020100
+limits_hex=402BFEFFC0D40100
+latest_diag={'stored_profile': 0, 'active_profile': 0, 'default_control': 2, 'enable_velocity_mode': True, 'enable_output_angle_mode': False, 'foc_valid': True, 'output_cal_valid': True, 'cal_load': 1, 'fault_code': 0, 'need_calibration': False, 'armed': False}
+events:
+  0.000s zero velocity + disarm
+  0.702s arm
+  1.108s plus5 cmd=5.0
+  3.108s zero_after_plus5 cmd=0.0
+  3.911s minus5 cmd=-5.0
+  5.916s zero_after_minus5 cmd=0.0
+  6.718s plus10 cmd=10.0
+  8.720s zero_after_plus10 cmd=0.0
+  9.521s minus10 cmd=-10.0
+segments:
+  name=plus5, command_deg_s=5.000, samples=65, avg_velocity_deg_s=2.796, tail_avg_velocity_deg_s=3.805, min_velocity_deg_s=-0.254, max_velocity_deg_s=4.395, angle_delta_deg=4.065
+  name=zero_after_plus5, command_deg_s=0.000, samples=38, avg_velocity_deg_s=0.089, tail_avg_velocity_deg_s=0.000, min_velocity_deg_s=-0.338, max_velocity_deg_s=2.620, angle_delta_deg=-0.013
+  name=minus5, command_deg_s=-5.000, samples=92, avg_velocity_deg_s=-2.043, tail_avg_velocity_deg_s=-1.444, min_velocity_deg_s=-3.296, max_velocity_deg_s=0.169, angle_delta_deg=-4.060
+  name=zero_after_minus5, command_deg_s=0.000, samples=35, avg_velocity_deg_s=0.027, tail_avg_velocity_deg_s=-0.005, min_velocity_deg_s=-0.338, max_velocity_deg_s=0.423, angle_delta_deg=0.000
+  name=plus10, command_deg_s=10.000, samples=92, avg_velocity_deg_s=2.277, tail_avg_velocity_deg_s=0.099, min_velocity_deg_s=-0.254, max_velocity_deg_s=7.099, angle_delta_deg=4.648
+  name=zero_after_plus10, command_deg_s=0.000, samples=38, avg_velocity_deg_s=0.013, tail_avg_velocity_deg_s=0.009, min_velocity_deg_s=-0.338, max_velocity_deg_s=0.338, angle_delta_deg=-0.013
+  name=minus10, command_deg_s=-10.000, samples=92, avg_velocity_deg_s=-2.327, tail_avg_velocity_deg_s=-3.777, min_velocity_deg_s=-6.676, max_velocity_deg_s=0.000, angle_delta_deg=-4.729

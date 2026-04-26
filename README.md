@@ -96,14 +96,32 @@ pio run -e tmag_lut_angle_test_f446re
 
 현재 steering 운영 기준 PID 값은 아래와 같습니다.
 
-- 적용 위치: [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
+- 적용 위치: [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h), [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
 - `motor.PID_velocity.P = 0.12`
 - `motor.PID_velocity.I = 2.0`
 - `motor.PID_velocity.D = 0.0`
+- `motor.LPF_velocity.Tf = 0.007`
 - `pvc.Kp = 3.0`
 
 이 값은 2026-04-25 기준 `S01` 실기 재튜닝 후 유지하기로 결정한 설정입니다.
 큰 각도 이동에서도 불안정한 지속 발진은 보이지 않았고, 현재는 추가 조정 없이 이 값을 운영 기준으로 사용합니다.
+
+Driving `D01..D04`는 steering보다 낮은 감속비(`78:15`, `5.2:1`)를 사용하므로 별도 velocity PI를 적용합니다.
+
+- 적용 위치: [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini)
+- `motor.PID_velocity.D = 0.0`
+- `motor.LPF_velocity.Tf = 0.01`
+- `pvc.Kp = 3.0` 유지, 단 `VelocityOnly` profile에서는 angle outer loop를 사용하지 않습니다.
+
+현재 driving velocity PI 값:
+
+- `D01..D04`: `P = 0.18`, `I = 7.0`
+
+`D02`는 2026-04-26 실기 테스트에서 여러 후보를 비교했고, 이후 사용자가 지정한 D02 기준값을 `D01..D04` driving 펌웨어에 통일했습니다. `D01..D04`는 모두 `VelocityOnly` profile, `21` pole pairs, `5.2:1` gear ratio, SVPWM으로 빌드합니다.
+
+FOC sensor alignment voltage는 기본 `1.0V`입니다. 기계 저항이 큰 driving 감속기에서는 보드별 빌드 플래그 `BUILD_ALIGN_VOLTAGE`로 올릴 수 있으며, 현재 `D01..D04` driving 펌웨어는 모두 `5.0V`로 빌드합니다.
+
+전압 기반 torque limit의 공통 소스 기본값은 `TORQUE_LIMIT_VOLTS = 12.0V`입니다. 보드별 빌드 플래그 `BUILD_TORQUE_LIMIT_VOLTS`로 override할 수 있으며, 현재 `D01..D04` driving 펌웨어는 모두 `40.0V`로 빌드합니다.
 
 ## FRAM calibration 저장 정책
 

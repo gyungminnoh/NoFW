@@ -3282,3 +3282,510 @@ S01-S04 simultaneous slow sweep with logging:
   - S02: `-88.242 .. 90.004 deg`, final `89.993 deg`, max `|velocity| = 22.869 deg/s`, fault samples `0`
   - S03: `-88.232 .. 90.002 deg`, final `89.990 deg`, max `|velocity| = 23.247 deg/s`, fault samples `0`
   - S04: `-88.236 .. 90.029 deg`, final `89.987 deg`, max `|velocity| = 23.388 deg/s`, fault samples `0`
+
+D02 firmware upload:
+
+- test time: `2026-04-26 04:06 KST`
+- flashed the currently ST-Link-connected board as `D02`:
+  - `pio run -e custom_f446re_d02 -t upload`
+  - result: upload success, verify OK, target reset
+- deployment mapping:
+  - D02/node `6`
+  - driving back-right
+  - VelocityOnly profile
+
+CAN web UI for D02 testing:
+
+- test time: `2026-04-26 04:08 KST`
+- `can0` was brought up at `1000000` bps:
+  - final state: `ERROR-ACTIVE`
+- existing server was already running on port `8765`:
+  - `python3 tools/can_ui/server.py --host 0.0.0.0 --port 8765 --can-iface can0 --node-id 1`
+- started a separate D02-focused server:
+  - `python3 tools/can_ui/server.py --host 0.0.0.0 --port 8766 --can-iface can0 --node-id 6`
+  - URL: `http://127.0.0.1:8766`
+- smoke test:
+  - `python3 tools/can_ui/smoke_test.py --use-running-server --port 8766 --can-iface can0 --node-id 6`
+  - result: `SUMMARY PASS 30/30 passed`
+- live D02/node `6` state observed through the server:
+  - link alive
+  - angle `0.000 deg`
+  - velocity `0.000 deg/s`
+  - stream off
+  - disarmed
+  - fault `None`
+  - FOC valid
+  - output calibration invalid
+  - `need_calibration = 1`
+  - current reported profile/config is `As5600`, not the expected D02 `VelocityOnly` deployment profile
+
+D02 deployment-default fix and forced FOC calibration:
+
+- test time: `2026-04-26 04:11 KST`
+- stopped the old CAN UI server on port `8765`:
+  - it had been running as node `1`
+  - only the D02-focused server on port `8766` remains running
+- found a deployment mismatch before the fix:
+  - `custom_f446re_d02` only changed `BUILD_CAN_NODE_ID=6`
+  - firmware defaults were still common steering defaults: profile `As5600`, gear `50.0`
+  - board deployment table requires D02/node `6`, profile `VelocityOnly`, gear `78:15` (`5.2`)
+- code change:
+  - added `BUILD_GEAR_RATIO` support in [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h)
+  - added `BUILD_DEFAULT_OUTPUT_ENCODER_TYPE` support in [src/config/actuator_defaults.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/config/actuator_defaults.cpp)
+  - set D01-D04 envs in [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) to:
+    - `BUILD_DEFAULT_OUTPUT_ENCODER_TYPE=0` (`VelocityOnly`)
+    - `BUILD_GEAR_RATIO=5.2f`
+- verification/build/upload:
+  - `pio run -e custom_f446re_d02`
+  - `pio run -e custom_f446re_d02 -t upload`
+  - result: upload success, verify OK, target reset
+- live CAN state after upload matched the deployment table:
+  - node `6`
+  - profile `VelocityOnly`
+  - default control mode `OutputVelocity`
+  - gear ratio `5.2`
+  - velocity mode enabled
+  - output angle mode disabled
+  - config frame `5014000000020100`
+- forced FOC calibration over CAN:
+  - disarm: `cansend can0 236#00`
+  - FOC calibration command: `cansend can0 296#01`
+  - final disarm: `cansend can0 236#00`
+- final live diag:
+  - `FB0000021D000000`
+  - profile `VelocityOnly`
+  - disarmed
+  - FOC valid
+  - output calibration valid for current profile
+  - `need_calibration = 0`
+  - runtime fault `0`
+- capture log:
+  - `/tmp/d02_force_foc_20260426_041117.log`
+
+D02 driving PID separation and first checks:
+
+- test time: `2026-04-26 04:22 KST`
+- reason:
+  - steering PID values were still being used by driving envs
+  - driving gear ratio is `5.2:1`, not steering `50:1`
+- code changes:
+  - added build-time control gain macros in [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h):
+    - `BUILD_MOTOR_VELOCITY_PID_P`
+    - `BUILD_MOTOR_VELOCITY_PID_I`
+    - `BUILD_MOTOR_VELOCITY_PID_D`
+    - `BUILD_MOTOR_VELOCITY_LPF_TF`
+    - `BUILD_OUTER_ANGLE_KP`
+  - [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp) now applies those macros instead of hard-coded steering gains
+  - [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) now sets D01-D04 driving gains separately
+  - [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md) now records steering and driving gains separately
+- attempted D02 driving gain values:
+  - first attempt: `P=0.06`, `I=0.6`, `D=0`, `LPF=0.01`
+    - uploaded D02 successfully
+    - velocity tests showed the gains were too weak and delayed
+    - `+10 deg/s` and `+30 deg/s` did not track normally
+    - logs:
+      - [docs/d02_velocity_pid_check_20260426_041908.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_pid_check_20260426_041908.csv)
+      - [docs/d02_velocity_pid_check_30dps_20260426_042006.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_pid_check_30dps_20260426_042006.csv)
+  - second attempt/current uploaded value: `P=0.6`, `I=0.8`, `D=0`, `LPF=0.01`
+    - uploaded D02 successfully, verify OK
+    - `+30/-30 deg/s` still did not track normally
+    - observed sign/delay behavior:
+      - `+30 deg/s` window average about `-2.700 deg/s`
+      - `-30 deg/s` window average about `0.286 deg/s`
+      - delayed motion after command changes
+    - no runtime fault samples were observed
+    - log:
+      - [docs/d02_velocity_pid_check_p060_i080_20260426_042122.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_pid_check_p060_i080_20260426_042122.csv)
+- final safety state:
+  - sent `cansend can0 216#00000000`
+  - sent `cansend can0 236#00`
+  - final D02 diag: `FB0000021D000000`
+  - disarmed, stream off, fault `0`
+- conclusion:
+  - D02 does need driving-specific gains
+  - but the current behavior is not solved by PI tuning alone
+  - before further gain increases, inspect velocity direction/sign and FOC validity under motion
+
+D02 FOC recalibration after PSU interruption:
+
+- test time: `2026-04-26 04:26 KST`
+- context:
+  - user reported the power supply turned off during the previous test
+  - previous motion/diagnostic state was treated as unreliable
+- CAN recovery:
+  - `can0` was initially `ERROR-WARNING`
+  - restarted `can0` at `1000000` bps
+  - final CAN state before calibration: `ERROR-ACTIVE`
+- ran D02/node `6` FOC recalibration from a safe state:
+  - zero velocity: `cansend can0 216#00000000`
+  - disarm: `cansend can0 236#00`
+  - FOC calibration command: `cansend can0 296#01`
+  - final zero velocity/disarm after wait:
+    - `cansend can0 216#00000000`
+    - `cansend can0 236#00`
+- verification:
+  - status capture saw D02 velocity/config/diag frames
+  - latest config frame `5014000000020100`
+    - gear ratio `5.2`
+    - profile `VelocityOnly`
+    - default control mode `OutputVelocity`
+    - velocity mode enabled
+    - output angle mode disabled
+  - latest diag `FB0000021D000000`
+    - disarmed
+    - FOC valid
+    - output calibration valid for current profile
+    - `need_calibration = 0`
+    - runtime fault `0`
+  - D02 web UI state also reported link alive, stream off, disarmed, fault `None`
+- capture log:
+  - `/tmp/d02_refoc_after_psu_20260426_042532.log`
+
+D02 velocity direction/PID continuation after refoc:
+
+- test time: `2026-04-26 04:33 KST`
+- context:
+  - continued the original D02 driving PID/direction work after the PSU interruption and FOC recalibration
+  - switched the motion test sender to a raw SocketCAN socket to avoid `cansend` process/queue artifacts
+  - `can0` was restarted before the socket tests and confirmed `ERROR-ACTIVE`
+- D02 firmware/control values currently uploaded:
+  - node `6`
+  - profile `VelocityOnly`
+  - gear ratio `5.2`
+  - default control mode `OutputVelocity`
+  - driving velocity PID: `P=1.2`, `I=0.2`, `D=0.0`, `LPF=0.01`
+- raw SocketCAN test results:
+  - with previous `P=0.6`, `I=0.8`, `D=0`, `LPF=0.01`:
+    - [docs/d02_velocity_direction_socket_20260426_042741.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_direction_socket_20260426_042741.csv)
+      - `+10 deg/s` early response moved briefly, then tail average fell back near zero
+      - `-10 deg/s` response stayed near zero
+      - send errors: `0`
+    - [docs/d02_velocity_direction_socket_60dps_20260426_042853.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_direction_socket_60dps_20260426_042853.csv)
+      - `+60 deg/s` average about `0.06 deg/s`
+      - `-60 deg/s` average about `-1.87 deg/s`, with a transient minimum about `-27.80 deg/s`
+      - send errors: `0`
+    - [docs/d02_velocity_direction_socket_neg_first_20260426_042938.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_direction_socket_neg_first_20260426_042938.csv)
+      - `-60 deg/s` first average about `-0.01 deg/s`
+      - `+60 deg/s` second average about `1.36 deg/s`, with a transient maximum about `28.14 deg/s`
+      - send errors: `0`
+  - after changing D02 driving PID to `P=1.2`, `I=0.2`, `D=0`, `LPF=0.01` and re-uploading D02:
+    - [docs/d02_velocity_direction_socket_p120_i020_20260426_043052.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_direction_socket_p120_i020_20260426_043052.csv)
+      - `+60 deg/s` average about `0.02 deg/s`
+      - `-60 deg/s` average about `-1.92 deg/s`, with a transient minimum about `-21.04 deg/s`
+      - send errors: `0`
+    - [docs/d02_velocity_direction_socket_120pulse_20260426_043133.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_velocity_direction_socket_120pulse_20260426_043133.csv)
+      - `+120 deg/s` pulse average about `0.10 deg/s`
+      - `-120 deg/s` pulse average about `-0.79 deg/s`, with a transient minimum about `-4.82 deg/s`
+      - send errors: `0`
+- observed state during/after tests:
+  - command transmit path was working
+  - D02 armed during command windows
+  - no firmware runtime fault was reported in sampled diag frames
+  - latest final state from the web API:
+    - link alive
+    - `can0` `ERROR-ACTIVE`
+    - config `5014000000020100`
+    - diag `FB0000021D000000`
+    - disarmed
+    - FOC valid
+    - output calibration valid for current profile
+    - runtime fault `0`
+    - stream off
+- conclusion:
+  - the current D02 problem is not explained by missing CAN target commands
+  - the board accepts commands and arms, but the motor barely produces sustained velocity even for `+-120 deg/s` commands
+  - simple PI gain tuning is unlikely to be the primary blocker now
+  - next checks should focus on the physical/electrical side:
+    - PSU voltage/current limit under arm and command
+    - motor phase continuity/order and connector seating
+    - driver gate enable and hardware fault signal visibility
+    - mechanical binding/load
+    - pole-pair/phase-order assumptions used by FOC calibration
+
+D02 FOC align voltage increased for high-friction gearbox check:
+
+- test time: `2026-04-26 04:39 KST`
+- rationale:
+  - default `ALIGN_VOLTAGE` was `1.0V`
+  - D02 gearbox has significant mechanical resistance, so the FOC sensor alignment torque may have been too low to produce a reliable rotor alignment
+- code/config change:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) now supports `BUILD_ALIGN_VOLTAGE`, defaulting to `1.0f`
+  - [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) sets only `custom_f446re_d02` to `BUILD_ALIGN_VOLTAGE=2.5f`
+- build/upload:
+  - `pio run -e custom_f446re_d02` succeeded
+  - `pio run -e custom_f446re_d02 -t upload` succeeded through ST-Link, verify OK
+- CAN FOC recalibration:
+  - sent D02 zero velocity: `cansend can0 216#00000000`
+  - sent D02 disarm: `cansend can0 236#00`
+  - sent D02 force FOC calibration: `cansend can0 296#01`
+  - sent zero velocity and disarm after the calibration window
+- status after calibration:
+  - D02 link alive on `can0`
+  - config frame `5014000000020100`: gear `5.2`, profile `VelocityOnly`, default `OutputVelocity`
+  - diag frame `FB0000021D000000`: disarmed, FOC valid, trusted calibration, fault `None`, `need_calibration = false`
+- low-speed check after 2.5V calibration:
+  - log: [docs/d02_align25_low_speed_20260426_043947.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_align25_low_speed_20260426_043947.csv)
+  - `+10 deg/s`: average measured velocity about `+0.723 deg/s`, max `+4.479 deg/s`
+  - `-10 deg/s`: average measured velocity about `-1.407 deg/s`, min `-3.296 deg/s`
+  - final state: stream off, disarmed, fault `None`
+- conclusion:
+  - increasing FOC alignment voltage to `2.5V` did not by itself restore useful sustained D02 velocity tracking
+  - FOC alignment voltage may still have been a contributing factor, but the remaining issue is more likely physical/electrical resistance, phase wiring/order, driver output, power/current limit, or motor/gearbox loading
+
+Driving FOC align voltage policy unified:
+
+- update time: `2026-04-26 04:43 KST`
+- user decision:
+  - D01, D03, and D04 should use the same FOC calibration/alignment voltage as D02
+- code/config change:
+  - [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) now sets `BUILD_ALIGN_VOLTAGE=2.5f` for all driving firmware environments:
+    - `custom_f446re_d01`
+    - `custom_f446re_d02`
+    - `custom_f446re_d03`
+    - `custom_f446re_d04`
+- policy:
+  - steering firmware keeps the default `ALIGN_VOLTAGE=1.0V`
+  - driving firmware uses `ALIGN_VOLTAGE=2.5V`
+
+D02 velocity PID tuning attempt:
+
+- test time: `2026-04-26 05:38 KST`
+- target:
+  - tune D02 driving velocity PID after unifying driving FOC alignment voltage to `2.5V`
+  - D02 is node `6`, profile `VelocityOnly`, gear `5.2`
+- important correction:
+  - during review of [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini), an intermediate PID edit was found in the D01 block instead of D02
+  - D01 was restored to `P=1.2`, `I=0.2`
+  - D02 was then explicitly changed and uploaded for the valid tests below
+- baseline D02 test before valid PID changes:
+  - firmware values: `P=1.2`, `I=0.2`, `D=0`, `LPF=0.01`
+  - log: [docs/d02_pid_baseline_p120_i020_20260426_053225.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_pid_baseline_p120_i020_20260426_053225.csv)
+  - `+10 deg/s`: average about `+0.317 deg/s`, tail average about `+0.026 deg/s`
+  - `-10 deg/s`: average about `-0.989 deg/s`, tail average about `-1.897 deg/s`
+- actual D02 `P=8.0`, `I=1.2` test:
+  - uploaded `custom_f446re_d02`, verify OK
+  - log: [docs/d02_pid_actual_p800_i120_20260426_053720.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_pid_actual_p800_i120_20260426_053720.csv)
+  - `+10 deg/s`: average about `+2.171 deg/s`, tail average about `+0.378 deg/s`, peak about `+8.536 deg/s`
+  - `-10 deg/s`: average about `-2.394 deg/s`, tail average about `-0.067 deg/s`, peak about `-7.521 deg/s`
+  - no fault/disarm occurred during the command windows; it accelerated briefly then collapsed near zero while still armed
+- actual D02 `P=4.0`, `I=2.0` test:
+  - uploaded `custom_f446re_d02`, verify OK
+  - log: [docs/d02_pid_actual_p400_i200_20260426_053822.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_pid_actual_p400_i200_20260426_053822.csv)
+  - `+10 deg/s`: average about `+1.988 deg/s`, tail average about `+0.074 deg/s`, peak about `+8.282 deg/s`
+  - `-10 deg/s`: average about `-1.850 deg/s`, tail average about `-3.000 deg/s`, peak about `-5.409 deg/s`
+  - final state after cleanup: zero command sent, stream off, disarmed, D02 link alive, fault `None`
+- current uploaded D02 firmware after this attempt:
+  - `P=4.0`, `I=2.0`, `D=0.0`, `LPF=0.01`
+- conclusion:
+  - PID changes can create a stronger initial response, but sustained velocity tracking still collapses
+  - the behavior is not explained by CAN command loss or firmware runtime fault
+  - do not propagate the D02 candidate PID to D01/D03/D04 yet
+  - next investigation should focus on non-PID causes: PSU current/voltage limit under load, driver/phase output, phase order, FOC alignment validity under gearbox load, and mechanical stick-slip/binding
+
+D02 FOC calibration reliability check:
+
+- test time: `2026-04-26 20:07 KST`
+- context:
+  - user asked to check FOC calibration reliability
+  - current firmware/protocol reports only FOC valid/fault/trusted status, not the raw `sensor_direction` or `zero_electric_angle`
+  - therefore the reliability proxy was:
+    - repeated force FOC calibration on D02
+    - diagnostic result after each calibration
+    - output angle/velocity movement during calibration
+    - identical `+10/-10 deg/s` response immediately after each calibration
+- setup:
+  - `can0` was down at the start and was restarted at `1 Mbps`
+  - test used raw SocketCAN, not the web UI server
+  - D02 node `6`, profile `VelocityOnly`, gear `5.2`
+  - current uploaded D02 PID candidate was `P=4.0`, `I=2.0`, `D=0.0`, `LPF=0.01`
+- log files:
+  - [docs/d02_foc_reliability_20260426_200735.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_foc_reliability_20260426_200735.csv)
+  - [docs/d02_foc_reliability_20260426_200735.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_foc_reliability_20260426_200735.summary.txt)
+- repeated FOC results:
+  - cycle 1:
+    - FOC diag `FB0000021D000000`: FOC valid, output calibration valid, trusted, fault `0`, disarmed
+    - FOC-phase output angle range about `63.844 deg`
+    - response `+10 deg/s`: average `+1.214`, tail average `+0.021`, max `+7.352`
+    - response `-10 deg/s`: average `-2.371`, tail average `-3.590`, min `-5.493`
+  - cycle 2:
+    - FOC diag `FB0000021D000000`
+    - FOC-phase output angle range about `2.502 deg`
+    - response `+10 deg/s`: average `+1.224`, tail average `+0.024`, max `+7.521`
+    - response `-10 deg/s`: average `-2.333`, tail average `-3.050`, min `-5.240`
+  - cycle 3:
+    - FOC diag `FB0000021D000000`
+    - FOC-phase output angle range about `2.468 deg`
+    - response `+10 deg/s`: average `+1.270`, tail average `+0.042`, max `+7.606`
+    - response `-10 deg/s`: average `-2.323`, tail average `-4.473`, min `-6.592`
+- interpretation:
+  - all three calibrations completed without runtime fault and reported trusted FOC valid afterward
+  - after the first calibration, the FOC-phase output movement was repeatable at about `2.5 deg`
+  - the post-calibration velocity response was also repeatable: brief initial motion, then poor sustained tracking
+  - this does not look like random FOC calibration result variation between runs
+  - the large cycle-1 angle range likely reflects the first recalibration settling from the previously stored/loaded alignment state, while cycles 2 and 3 are much tighter
+- conclusion:
+  - based on available telemetry, D02 FOC calibration appears repeatable after the first forced recalibration
+  - the remaining drive problem is still present after repeatable FOC calibration, so the next likely causes are PSU/current limit, driver/phase output, motor phase order, mechanical stick-slip/binding, or a need to expose and compare raw `zero_electric_angle`/`sensor_direction` over CAN for direct confirmation
+
+Torque limit update for gearbox-resistance testing:
+
+- test time: `2026-04-26 KST`
+- user hypothesis:
+  - D02 poor sustained velocity tracking may be caused by high gearbox resistance
+  - user will manage safety by lowering/raising the external power supply bus voltage/current limit
+- code change:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) now sets `TORQUE_LIMIT_VOLTS = 40.0f`
+  - this removes the previous firmware-side 12V output cap
+  - the motor voltage command is still capped by `VOLTAGE_LIMIT = 40.0f` and the external bus supply
+- documentation:
+  - [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md) records that torque limiting for this bench tuning step is managed by the external power supply bus voltage/current limit
+- build/upload:
+  - built `custom_f446re_d02` successfully
+  - uploaded `custom_f446re_d02` via ST-Link successfully; OpenOCD verify OK
+  - sent D02 zero velocity and disarm after upload:
+    - `cansend can0 216#00000000`
+    - `cansend can0 236#00`
+  - observed D02 CAN frames after upload:
+    - diag `5F6#FB0000021D000000`: FOC valid, output calibration valid, trusted, fault `0`, disarmed
+    - config `436#5014000000020100`: gear `5.2`, `VelocityOnly`, default `OutputVelocity`
+
+Torque limit source default restored:
+
+- user clarified that only the already-uploaded D02 firmware should keep the `40.0V` torque limit for this bench experiment
+- source default restored:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) now sets `TORQUE_LIMIT_VOLTS = 12.0f`
+  - [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md) documents that D02 had a temporary uploaded `40.0V` firmware, while future builds default back to `12.0V`
+- no firmware upload was performed after restoring the source default, so the currently flashed D02 remains the previously uploaded `40.0V` torque-limit image
+
+D02 response check with flashed 40V torque-limit firmware:
+
+- test time: `2026-04-26 20:20 KST`
+- firmware state:
+  - D02 actual flash is still the temporary `TORQUE_LIMIT_VOLTS = 40.0V` image
+  - source default had already been restored to `12.0V`, and no upload was performed after that restore
+- setup:
+  - raw SocketCAN sender/receiver on `can0`, no web UI server
+  - D02 node `6`, `VelocityOnly`, gear `5.2`
+  - started from zero velocity and disarmed state
+  - command stream was sent periodically while armed, then zero velocity and disarm were sent at the end
+- log files:
+  - [docs/d02_torque40_response_20260426_202029.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_response_20260426_202029.csv)
+  - [docs/d02_torque40_response_20260426_202029.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_response_20260426_202029.summary.txt)
+  - [docs/d02_torque40_response_20260426_202029.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_response_20260426_202029.svg)
+- response summary:
+  - `+5 deg/s`: avg `+2.796 deg/s`, tail avg `+3.805 deg/s`, max `+4.395 deg/s`, angle delta `+4.065 deg`
+  - `-5 deg/s`: avg `-2.043 deg/s`, tail avg `-1.444 deg/s`, min `-3.296 deg/s`, angle delta `-4.060 deg`
+  - `+10 deg/s`: avg `+2.277 deg/s`, tail avg `+0.099 deg/s`, max `+7.099 deg/s`, angle delta `+4.648 deg`
+  - `-10 deg/s`: avg `-2.327 deg/s`, tail avg `-3.777 deg/s`, min `-6.676 deg/s`, angle delta `-4.729 deg`
+- final state:
+  - zero velocity command sent
+  - disarmed
+  - diag reported FOC valid, output calibration valid, fault `0`
+- interpretation:
+  - `+5 deg/s` sustained response improved meaningfully compared with the earlier near-zero tail behavior
+  - `+10 deg/s` still collapses after an initial response
+  - negative direction still moves but does not reach command magnitude
+  - the temporary 40V torque-limit image helps at very low speed, but did not by itself produce stable `+-10 deg/s` tracking under the current bench conditions
+
+D02 response check after user increased bus voltage:
+
+- test time: `2026-04-26 20:24 KST`
+- context:
+  - user increased the external power-supply bus voltage
+  - D02 actual flash is still the temporary `TORQUE_LIMIT_VOLTS = 40.0V` firmware
+  - source default remains restored to `TORQUE_LIMIT_VOLTS = 12.0V`; no new upload was performed
+- setup:
+  - repeated the same raw SocketCAN command sequence as the previous D02 40V torque-limit test:
+    - `+5`, zero, `-5`, zero, `+10`, zero, `-10 deg/s`
+  - generated comparison plots using the repo `.venv` Python, where `matplotlib 3.10.8` is available
+- new log files:
+  - [docs/d02_torque40_highbus_response_20260426_202438.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_highbus_response_20260426_202438.csv)
+  - [docs/d02_torque40_highbus_response_20260426_202438.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_highbus_response_20260426_202438.summary.txt)
+- comparison artifacts:
+  - [docs/d02_torque40_bus_voltage_compare_20260426_202438.png](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_bus_voltage_compare_20260426_202438.png)
+  - [docs/d02_torque40_bus_voltage_compare_20260426_202438.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_bus_voltage_compare_20260426_202438.svg)
+  - [docs/d02_torque40_bus_voltage_compare_20260426_202438.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_torque40_bus_voltage_compare_20260426_202438.summary.txt)
+- higher-bus response summary:
+  - `+5 deg/s`: avg `+3.103 deg/s`, tail avg `+3.841 deg/s`, max `+4.479 deg/s`, angle delta `+4.458 deg`
+  - `-5 deg/s`: avg `-2.294 deg/s`, tail avg `-1.622 deg/s`, min `-3.972 deg/s`, angle delta `-4.483 deg`
+  - `+10 deg/s`: avg `+2.292 deg/s`, tail avg about `0.0 deg/s`, max `+7.521 deg/s`, angle delta `+4.724 deg`
+  - `-10 deg/s`: avg `-2.430 deg/s`, tail avg `-2.412 deg/s`, min `-6.000 deg/s`, angle delta `-4.767 deg`
+- comparison with previous bus voltage:
+  - `+5 deg/s`: average improved slightly; tail stayed about the same
+  - `-5 deg/s`: average improved slightly; tail stayed about the same
+  - `+10 deg/s`: peak increased slightly, but tail still collapsed to about zero
+  - `-10 deg/s`: overall angle travel was essentially unchanged; tail was worse than the immediately previous run
+- final state:
+  - sent zero velocity and disarm
+  - final diag `5F6#FB0000021D000000`: FOC valid, output calibration valid, trusted, fault `0`, disarmed
+- interpretation:
+  - raising bus voltage produced only a small improvement at `+-5 deg/s`
+  - it did not solve the core sustained tracking failure at `+10 deg/s`
+  - this points away from simple bus-voltage shortage alone and toward control saturation/stiction/friction compensation, phase/FOC effectiveness under load, or mechanical binding
+
+D02 PID-increase firmware upload only:
+
+- test time: `2026-04-26 KST`
+- user instruction:
+  - increase PID gains for D02 investigation
+  - do not drive the motor
+  - perform firmware upload only
+- code changes:
+  - [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h) now supports `BUILD_TORQUE_LIMIT_VOLTS`, defaulting to `12.0f`
+  - [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) sets only `custom_f446re_d02` to `BUILD_TORQUE_LIMIT_VOLTS=40.0f`
+  - [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini) sets D02 velocity PID candidate to `P=8.0`, `I=2.0`, `D=0.0`, `LPF=0.01`
+  - D01/D03/D04 and steering builds continue to use the default `12.0V` torque limit unless their environment overrides it
+- documentation:
+  - [README.md](/home/gyungminnoh/projects/NoFW/NoFW/README.md) updated to describe the D02-only torque-limit override and D02 `P=8.0`, `I=2.0` candidate
+- build/upload:
+  - `pio run -e custom_f446re_d02` succeeded
+  - `pio run -e custom_f446re_d02 -t upload` succeeded via ST-Link
+  - OpenOCD verify OK and target reset completed
+  - no CAN arm, velocity command, or other motor-drive command was sent after upload, per user instruction
+
+D02 P=8.0/I=2.0 motion check:
+
+- test time: `2026-04-26 20:32 KST`
+- context:
+  - user then asked to drive the motor
+  - D02 firmware uploaded immediately before this test:
+    - `BUILD_TORQUE_LIMIT_VOLTS=40.0f`
+    - `BUILD_MOTOR_VELOCITY_PID_P=8.0f`
+    - `BUILD_MOTOR_VELOCITY_PID_I=2.0f`
+    - `BUILD_MOTOR_VELOCITY_PID_D=0.0f`
+    - `BUILD_MOTOR_VELOCITY_LPF_TF=0.01f`
+- setup:
+  - raw SocketCAN command stream on `can0`
+  - D02 node `6`, profile `VelocityOnly`, gear `5.2`
+  - started from zero velocity and disarmed state
+  - command sequence: `+5`, zero, `-5`, zero, `+10`, zero, `-10 deg/s`
+  - sent zero velocity and disarm in cleanup
+- log files:
+  - [docs/d02_p800_i200_torque40_response_20260426_203209.csv](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_p800_i200_torque40_response_20260426_203209.csv)
+  - [docs/d02_p800_i200_torque40_response_20260426_203209.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_p800_i200_torque40_response_20260426_203209.summary.txt)
+- comparison artifacts against previous `P=4.0/I=2.0` higher-bus test:
+  - [docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.png](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.png)
+  - [docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.svg](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.svg)
+  - [docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.summary.txt](/home/gyungminnoh/projects/NoFW/NoFW/docs/d02_p400_vs_p800_torque40_compare_20260426_203209_v2.summary.txt)
+- P=8 response summary:
+  - `+5 deg/s`: avg `+3.301`, tail avg `+3.488`, max `+4.733`, angle delta `+4.737 deg`
+  - `-5 deg/s`: avg `-2.393`, tail avg `-1.314`, min `-4.733`, angle delta `-4.737 deg`
+  - `+10 deg/s`: avg `+2.308`, tail avg `-0.004`, max `+10.902`, angle delta `+4.787 deg`
+  - `-10 deg/s`: avg `-2.498`, tail avg `-0.035`, min `-7.099`, angle delta `-4.821 deg`
+- comparison with previous P=4/I=2 high-bus test:
+  - `+5 deg/s`: average improved slightly, tail got slightly worse
+  - `-5 deg/s`: peak got stronger, tail got worse
+  - `+10 deg/s`: peak increased from about `+7.5` to `+10.9 deg/s`, but tail still collapsed to about zero
+  - `-10 deg/s`: peak got stronger, tail became much worse
+- observed final state from the motion script before bus receive stopped:
+  - latest diag: FOC valid, output calibration valid, fault `0`, disarmed
+- follow-up bus observation:
+  - after the test, a short status capture saw no D02 frames
+  - `can0` had entered `ERROR-PASSIVE`
+  - restarted `can0` at `1 Mbps`, returning it to `ERROR-ACTIVE`
+  - after restart, no D02 frames were observed during a `3 s` capture
+- interpretation:
+  - increasing P to `8.0` increases initial/peak response, which confirms the command path and controller output are affecting the motor
+  - it does not improve sustained tracking; at `+10/-10 deg/s` tail velocity still collapses
+  - this is not behaving like a simple low-P problem
+  - the post-test loss of D02 CAN status needs hardware/power/bus confirmation before further motion tests
