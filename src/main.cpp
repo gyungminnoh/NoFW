@@ -75,6 +75,7 @@ constexpr uint32_t kRuntimeDiagPeriodMs = 500;
 constexpr float kMinGearRatio = 0.001f;
 constexpr float kMaxGearRatio = 1000.0f;
 constexpr float kMaxConfigAbsDeg = 1000000.0f;
+constexpr float kMinVoltageLimit = 0.0f;
 constexpr float kAs5600AutoCalOutputVelocityDegS = 10.0f;
 constexpr uint32_t kAs5600AutoCalMoveMs = 500;
 constexpr float kAs5600AutoCalMinDeltaRad = 0.02f;
@@ -215,6 +216,25 @@ bool validGearRatio(float gear_ratio) {
          gear_ratio <= kMaxGearRatio;
 }
 
+bool validVoltageLimit(float voltage_limit) {
+  return isfinite(voltage_limit) &&
+         voltage_limit > kMinVoltageLimit &&
+         voltage_limit <= VOLTAGE_LIMIT;
+}
+
+float clampConfiguredVoltageLimit(float voltage_limit) {
+  if (!isfinite(voltage_limit)) {
+    return TORQUE_LIMIT_VOLTS;
+  }
+  if (voltage_limit < kMinVoltageLimit) {
+    return kMinVoltageLimit;
+  }
+  if (voltage_limit > VOLTAGE_LIMIT) {
+    return VOLTAGE_LIMIT;
+  }
+  return voltage_limit;
+}
+
 bool prepareAs5600Profile(ConfigStore::CalibrationBundle& bundle,
                           ProfileSelectResult& failure_result) {
   float angle_rad = 0.0f;
@@ -340,6 +360,16 @@ void sendRuntimeDiagIfDue() {
         config_data,
         config_len);
   }
+
+  uint8_t voltage_data[8] = {0};
+  uint8_t voltage_len = 0;
+  if (CanProtocol::encodeActuatorVoltageLimitStatus_OptionA(
+          actuator_config.voltage_limit, voltage_data, voltage_len)) {
+    CanTransport::sendStd(
+        CanProtocol::actuatorVoltageLimitStatusCanId(actuator_config.can_node_id),
+        voltage_data,
+        voltage_len);
+  }
 }
 
 void refreshBootReference() {
@@ -425,6 +455,19 @@ bool applyActuatorGearConfig(float gear_ratio, float current_motor_mt_rad) {
   }
 
   reconfigureRuntimeAfterActuatorConfigChange(current_motor_mt_rad, true);
+  return true;
+}
+
+bool applyActuatorVoltageLimitConfig(float voltage_limit) {
+  if (g_power_stage_armed || !validVoltageLimit(voltage_limit)) {
+    return false;
+  }
+
+  actuator_config.voltage_limit = voltage_limit;
+  if (!ConfigStore::saveActuatorConfig(actuator_config)) {
+    return false;
+  }
+  motor.voltage_limit = clampConfiguredVoltageLimit(actuator_config.voltage_limit);
   return true;
 }
 
@@ -1036,7 +1079,7 @@ static void initSystem() {
   motor.foc_modulation    = FOCModulationType::SpaceVectorPWM;
 
   motor.voltage_sensor_align = ALIGN_VOLTAGE;
-  motor.voltage_limit        = (TORQUE_LIMIT_VOLTS < VOLTAGE_LIMIT) ? TORQUE_LIMIT_VOLTS : VOLTAGE_LIMIT;
+  motor.voltage_limit        = clampConfiguredVoltageLimit(actuator_config.voltage_limit);
 
   motor.PID_velocity.P = MOTOR_VELOCITY_PID_P;
   motor.PID_velocity.I = MOTOR_VELOCITY_PID_I;
@@ -1148,6 +1191,12 @@ void loop() {
 
     if (CanService::takePendingFocCalibration()) {
       runFocCalibrationCommand();
+      return;
+    }
+
+    float requested_voltage_limit = 0.0f;
+    if (CanService::takePendingActuatorVoltageLimitConfig(requested_voltage_limit)) {
+      applyActuatorVoltageLimitConfig(requested_voltage_limit);
       return;
     }
 
@@ -1332,6 +1381,11 @@ void loop() {
 
   if (CanService::takePendingFocCalibration()) {
     // FOC recalibration is intentionally ignored while armed.
+  }
+
+  float requested_voltage_limit = 0.0f;
+  if (CanService::takePendingActuatorVoltageLimitConfig(requested_voltage_limit)) {
+    // Voltage-limit changes are intentionally ignored while armed.
   }
 
   if (ActuatorAPI::active_control_mode == ControlMode::OutputVelocity) {

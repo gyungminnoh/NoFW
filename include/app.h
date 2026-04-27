@@ -14,7 +14,6 @@
 #include "position_velocity_controller.h"
 #include "as5600_bootstrap.h"
 #include "fm25cl64b_fram.h"
-#include "fram_self_test.h"
 #include "can_service.h"
 #include "config/actuator_config.h"
 #include "config/calibration_data.h"

@@ -29,6 +29,8 @@ static OutputEncoderType g_pending_output_encoder_auto_cal_type = OutputEncoderT
 static bool g_has_pending_output_encoder_zero_capture = false;
 static OutputEncoderType g_pending_output_encoder_zero_capture_type = OutputEncoderType::As5600;
 static bool g_has_pending_foc_calibration = false;
+static bool g_has_pending_actuator_voltage_limit_config = false;
+static float g_pending_voltage_limit = 0.0f;
 static float g_last_pos_mt_rad = 0.0f;
 static uint32_t g_last_pos_sample_ms = 0;
 
@@ -56,6 +58,7 @@ bool init(const ActuatorConfig& actuator_config) {
   g_has_pending_output_encoder_auto_cal = false;
   g_has_pending_output_encoder_zero_capture = false;
   g_has_pending_foc_calibration = false;
+  g_has_pending_actuator_voltage_limit_config = false;
   g_last_pos_mt_rad = 0.0f;
   g_last_pos_sample_ms = 0;
   return ok;
@@ -178,6 +181,17 @@ void poll(float current_motor_mt_rad) {
         continue;
       }
       g_has_pending_foc_calibration = true;
+      continue;
+    }
+
+    if (f.std_id == CanProtocol::actuatorVoltageLimitConfigCmdCanId(g_can_node_id)) {
+      float voltage_limit = 0.0f;
+      if (!CanProtocol::decodeActuatorVoltageLimitCmd_OptionA(
+              f.data, f.dlc, voltage_limit)) {
+        continue;
+      }
+      g_pending_voltage_limit = voltage_limit;
+      g_has_pending_actuator_voltage_limit_config = true;
     }
   }
 
@@ -308,6 +322,15 @@ bool takePendingFocCalibration() {
     return false;
   }
   g_has_pending_foc_calibration = false;
+  return true;
+}
+
+bool takePendingActuatorVoltageLimitConfig(float& out_voltage_limit) {
+  if (!g_has_pending_actuator_voltage_limit_config) {
+    return false;
+  }
+  out_voltage_limit = g_pending_voltage_limit;
+  g_has_pending_actuator_voltage_limit_config = false;
   return true;
 }
 

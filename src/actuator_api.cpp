@@ -20,7 +20,7 @@ constexpr float kRadPerDeg = PI / 180.0f;
 
 float gear_ratio_ = GEAR_RATIO;
 float output_min_deg_ = 0.0f;
-float output_max_deg_ = ACTUATOR_OUTPUT_MAX_DEG;
+float output_max_deg_ = ACTUATOR_OUTPUT_DEFAULT_MAX_DEG;
 int8_t motor_to_output_sign_ = 1;
 float output_velocity_limit_rad_s_ =
     ACTUATOR_MOTOR_VELOCITY_LIMIT_RAD_S / GEAR_RATIO;

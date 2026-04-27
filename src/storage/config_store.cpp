@@ -15,7 +15,7 @@ constexpr uint32_t kCalibrationMagic = 0x43424C42UL;      // "CBLB"
 constexpr uint16_t kActuatorConfigAddr = 0x0100;
 constexpr uint16_t kCalibrationSlotAAddr = 0x0200;
 constexpr uint16_t kCalibrationSlotBAddr = 0x1200;
-constexpr uint16_t kStoreVersion = 2;
+constexpr uint16_t kStoreVersion = 3;
 constexpr uint32_t kCalibrationCommitMagic = 0x434F4D54UL;  // "COMT"
 
 struct StoredActuatorConfig {
@@ -23,6 +23,31 @@ struct StoredActuatorConfig {
   uint16_t version = 0;
   uint16_t reserved = 0;
   ActuatorConfig config = {};
+};
+
+struct ActuatorConfigV2 {
+  uint32_t version = 2;
+
+  OutputEncoderType output_encoder_type = OutputEncoderType::As5600;
+  ControlMode default_control_mode = ControlMode::OutputAngle;
+
+  float gear_ratio = 1.0f;
+  int8_t motor_to_output_sign = 1;
+
+  float output_min_deg = 0.0f;
+  float output_max_deg = 0.0f;
+
+  bool enable_velocity_mode = true;
+  bool enable_output_angle_mode = true;
+
+  uint8_t can_node_id = 7;
+};
+
+struct StoredActuatorConfigV2 {
+  uint32_t magic = 0;
+  uint16_t version = 0;
+  uint16_t reserved = 0;
+  ActuatorConfigV2 config = {};
 };
 
 struct StoredCalibrationBundleSlot {
@@ -168,6 +193,28 @@ bool loadActuatorConfig(ActuatorConfig& out_config) {
     out_config = stored.config;
     // CAN node identity is deployment/build-time data, not a persisted runtime
     // setting. Always take it from the currently flashed firmware.
+    out_config.can_node_id = CAN_NODE_ID;
+    return true;
+  }
+  if (stored.magic == kActuatorConfigMagic && stored.version == 2) {
+    StoredActuatorConfigV2 legacy = {};
+    if (!FM25CL64B::readObject(kActuatorConfigAddr, legacy)) {
+      return false;
+    }
+    if (legacy.magic != kActuatorConfigMagic || legacy.version != 2) {
+      return false;
+    }
+    out_config = {};
+    out_config.version = 3;
+    out_config.output_encoder_type = legacy.config.output_encoder_type;
+    out_config.default_control_mode = legacy.config.default_control_mode;
+    out_config.gear_ratio = legacy.config.gear_ratio;
+    out_config.motor_to_output_sign = legacy.config.motor_to_output_sign;
+    out_config.output_min_deg = legacy.config.output_min_deg;
+    out_config.output_max_deg = legacy.config.output_max_deg;
+    out_config.enable_velocity_mode = legacy.config.enable_velocity_mode;
+    out_config.enable_output_angle_mode = legacy.config.enable_output_angle_mode;
+    out_config.voltage_limit = TORQUE_LIMIT_VOLTS;
     out_config.can_node_id = CAN_NODE_ID;
     return true;
   }

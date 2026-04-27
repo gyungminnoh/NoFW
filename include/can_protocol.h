@@ -20,6 +20,8 @@ namespace CanProtocol {
   uint16_t outputEncoderAutoCalCmdCanId(uint8_t node_id);
   uint16_t outputEncoderZeroCmdCanId(uint8_t node_id);
   uint16_t focCalibrationCmdCanId(uint8_t node_id);
+  uint16_t actuatorVoltageLimitConfigCmdCanId(uint8_t node_id);
+  uint16_t actuatorVoltageLimitStatusCanId(uint8_t node_id);
 
   bool decodeOutputAngleDeg_OptionA(const uint8_t data[8], uint8_t len, float& out_angle_deg);
   bool encodeOutputAngleDeg_OptionA(float angle_deg, uint8_t data[8], uint8_t& out_len);
@@ -71,5 +73,11 @@ namespace CanProtocol {
                                           uint8_t len,
                                           OutputEncoderType& out_encoder_type);
   bool decodeFocCalibrationCmd_OptionA(const uint8_t data[8], uint8_t len);
+  bool decodeActuatorVoltageLimitCmd_OptionA(const uint8_t data[8],
+                                             uint8_t len,
+                                             float& out_voltage_limit);
+  bool encodeActuatorVoltageLimitStatus_OptionA(float voltage_limit,
+                                                uint8_t data[8],
+                                                uint8_t& out_len);
 
 }

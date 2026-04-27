@@ -1,9 +1,0 @@
-cycle 1: foc_angle_range=63.844 deg, foc_vel_abs_max=0.423 deg/s, diag={'raw': 'FB0000021D000000', 'foc_valid': True, 'output_cal_valid': True, 'fault_code': 0, 'need_calibration': False, 'armed': False}
-  +10: samples=72 avg=+1.214 tail_avg=+0.021 min=-0.254 max=+7.352
-  -10: samples=84 avg=-2.371 tail_avg=-3.590 min=-5.493 max=+0.084
-cycle 2: foc_angle_range=2.502 deg, foc_vel_abs_max=0.423 deg/s, diag={'raw': 'FB0000021D000000', 'foc_valid': True, 'output_cal_valid': True, 'fault_code': 0, 'need_calibration': False, 'armed': False}
-  +10: samples=72 avg=+1.224 tail_avg=+0.024 min=-0.169 max=+7.521
-  -10: samples=84 avg=-2.333 tail_avg=-3.050 min=-5.240 max=+0.085
-cycle 3: foc_angle_range=2.468 deg, foc_vel_abs_max=0.338 deg/s, diag={'raw': 'FB0000021D000000', 'foc_valid': True, 'output_cal_valid': True, 'fault_code': 0, 'need_calibration': False, 'armed': False}
-  +10: samples=72 avg=+1.270 tail_avg=+0.042 min=-0.423 max=+7.606
-  -10: samples=83 avg=-2.323 tail_avg=-4.473 min=-6.592 max=+0.085

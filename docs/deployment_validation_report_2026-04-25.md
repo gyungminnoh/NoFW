@@ -5,7 +5,7 @@
 다음 세 가지를 실제 연결된 하드웨어에서 확인했다.
 
 - 배포표 기준 `CAN_NODE_ID` 변경 후 보드가 해당 ID로 정상 응답하는지
-- steering / driving / gripper 대표 설정이 실제로 저장되고 동작하는지
+- steering / driving / auxiliary angle actuator 대표 설정이 실제로 저장되고 동작하는지
 - 현재 코드 안에 배포 과정과 충돌하는 하드코딩이나 더 이상 쓰지 않는 항목이 있는지
 
 이번 검증은 현재 연결된 보드 `1`대를 사용해 대표 설정을 순차적으로 업로드하는 방식으로 진행했다.
@@ -28,7 +28,7 @@
 
 - 메인 제어 경로에서 `CAN node_id`, profile, gear ratio, travel limit 저장 경로는 서로 충돌하지 않았다
 - `output_min_deg/output_max_deg`는 저장 후 런타임에 반영되고 있었다
-- gripper 설정에서 현재 출력각이 하한 밖(`0 deg` 아래)일 때 음수 각도 명령이 일부 허용된 것처럼 보였지만,
+- auxiliary angle actuator 설정에서 현재 출력각이 하한 밖(`0 deg` 아래)일 때 음수 각도 명령이 일부 허용된 것처럼 보였지만,
   이는 버그가 아니라 "현재 이미 범위 밖이면 더 바깥쪽 명령은 막고, 안쪽 복귀 명령은 허용"하는 의도된 로직이었다
 
 ## 3. 대표 하드웨어 검증
@@ -81,7 +81,7 @@
 - overshoot: `1.072 deg/s`
 - first within `5%`: `1.225 s`
 
-### 3.3 Gripper representative
+### 3.3 Auxiliary angle actuator representative
 
 - firmware `CAN_NODE_ID = 31`
 - runtime config:

@@ -60,6 +60,14 @@ uint16_t focCalibrationCmdCanId(uint8_t node_id) {
   return CAN_ID_FOC_CALIBRATION_CMD_BASE + node_id;
 }
 
+uint16_t actuatorVoltageLimitConfigCmdCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_VOLTAGE_LIMIT_CONFIG_CMD_BASE + node_id;
+}
+
+uint16_t actuatorVoltageLimitStatusCanId(uint8_t node_id) {
+  return CAN_ID_ACTUATOR_VOLTAGE_LIMIT_STATUS_BASE + node_id;
+}
+
 namespace {
 
 bool decodeInt32MUnits_(const uint8_t data[8], uint8_t len, float& out_value) {
@@ -257,6 +265,18 @@ bool decodeOutputEncoderZeroCmd_OptionA(const uint8_t data[8],
 bool decodeFocCalibrationCmd_OptionA(const uint8_t data[8], uint8_t len) {
   if (len < 1) return false;
   return data[0] == 1;
+}
+
+bool decodeActuatorVoltageLimitCmd_OptionA(const uint8_t data[8],
+                                           uint8_t len,
+                                           float& out_voltage_limit) {
+  return decodeInt32MUnits_(data, len, out_voltage_limit);
+}
+
+bool encodeActuatorVoltageLimitStatus_OptionA(float voltage_limit,
+                                              uint8_t data[8],
+                                              uint8_t& out_len) {
+  return encodeInt32MUnits_(voltage_limit, data, out_len);
 }
 
 } // namespace

@@ -2,7 +2,7 @@
 
 이 문서는 현재 메인 펌웨어의 `CAN` 온와이어 형식을 설명한다.
 
-이제 메인 펌웨어는 그리퍼 전용 `% open` 프로토콜이 아니라, 출력축 기준 액추에이터 프로토콜을 사용한다.
+메인 펌웨어는 제품별 percentage 프로토콜이 아니라, 출력축 기준 액추에이터 프로토콜을 사용한다.
 
 핵심 단위는 다음 두 가지다.
 
@@ -31,11 +31,13 @@
 - 출력축 속도 상태 TX: `0x410 + node_id`
 - actuator travel limit 상태 TX: `0x420 + node_id`
 - actuator config 상태 TX: `0x430 + node_id`
+- actuator voltage limit 상태 TX: `0x440 + node_id`
 - 출력 프로파일 변경 RX: `0x220 + node_id`
 - power-stage arm/disarm RX: `0x230 + node_id`
 - actuator travel limit 설정 RX: `0x240 + node_id`
 - actuator gear ratio 설정 RX: `0x250 + node_id`
 - FOC calibration RX: `0x290 + node_id`
+- actuator voltage limit 설정 RX: `0x2A0 + node_id`
 - 런타임 진단 TX: `0x5F0 + node_id`
 
 기본 `node_id = 7`이면:
@@ -46,11 +48,13 @@
 - velocity status = `0x417`
 - actuator limits status = `0x427`
 - actuator config status = `0x437`
+- actuator voltage limit status = `0x447`
 - profile cmd = `0x227`
 - power-stage cmd = `0x237`
 - actuator limits config cmd = `0x247`
 - actuator gear config cmd = `0x257`
 - FOC calibration cmd = `0x297`
+- actuator voltage limit config cmd = `0x2A7`
 - runtime diag = `0x5F7`
 
 ## Numeric Encoding
@@ -185,6 +189,24 @@ Payload:
 ```text
 0x437#401F000001010300
 ```
+
+## Actuator Voltage Limit Status
+
+- ID: `0x440 + node_id`
+- DLC: `4`
+- 의미: 현재 motor torque/voltage limit
+- 단위: `V`
+- 인코딩: `int32 mV`
+- 송신 주기: runtime diagnostic과 동일하게 기본 `500 ms`
+
+Payload:
+
+- `data[0..3] = voltage_limit`
+
+예시:
+
+- `30.000 V` -> `30000` -> `30 75 00 00`
+- node `7`이면 `0x447#30750000`
 
 ## Output Profile Command
 

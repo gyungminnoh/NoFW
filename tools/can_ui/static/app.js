@@ -8,10 +8,12 @@ const stateEls = {
   outputMinStatus: document.getElementById("outputMinStatus"),
   outputMaxStatus: document.getElementById("outputMaxStatus"),
   gearRatioStatus: document.getElementById("gearRatioStatus"),
+  voltageLimitStatus: document.getElementById("voltageLimitStatus"),
   angleLimitFeedback: document.getElementById("angleLimitFeedback"),
   currentRangeFeedback: document.getElementById("currentRangeFeedback"),
   limitsConfigFeedback: document.getElementById("limitsConfigFeedback"),
   gearConfigFeedback: document.getElementById("gearConfigFeedback"),
+  voltageLimitFeedback: document.getElementById("voltageLimitFeedback"),
   profileFeedback: document.getElementById("profileFeedback"),
   storedProfile: document.getElementById("storedProfile"),
   activeProfile: document.getElementById("activeProfile"),
@@ -38,6 +40,7 @@ const controls = {
   loadConfigBtn: document.getElementById("loadConfigBtn"),
   saveLimitsBtn: document.getElementById("saveLimitsBtn"),
   saveGearRatioBtn: document.getElementById("saveGearRatioBtn"),
+  saveVoltageLimitBtn: document.getElementById("saveVoltageLimitBtn"),
   profileButtons: Array.from(document.querySelectorAll(".profile-btn")),
   anglePresetButtons: Array.from(document.querySelectorAll(".angle-preset")),
   velocityPresetButtons: Array.from(document.querySelectorAll(".velocity-preset")),
@@ -51,6 +54,7 @@ let profileFeedback = {
 let configInputsTouched = false;
 let pendingLimitsRequest = null;
 let pendingGearRequest = null;
+let pendingVoltageLimitRequest = null;
 
 function fmtNumber(value, suffix) {
   if (value === null || value === undefined) return "-";
@@ -178,6 +182,10 @@ function setConfigInputsFromState(state) {
   if (Number.isFinite(config.gear_ratio)) {
     document.getElementById("gearRatioInput").value = config.gear_ratio.toFixed(3);
   }
+  const voltageLimit = state.voltage_limit || {};
+  if (Number.isFinite(voltageLimit.voltage_limit)) {
+    document.getElementById("voltageLimitInput").value = voltageLimit.voltage_limit.toFixed(3);
+  }
   configInputsTouched = false;
 }
 
@@ -256,6 +264,8 @@ function updateProfileFeedback(diag, linkAlive, diagCanId) {
 function updateActuatorConfigFeedback(state, linkAlive, armed) {
   const limits = state.limits || {};
   const config = state.config || {};
+  const voltageLimit = state.voltage_limit || {};
+  const voltageCanId = `0x${(0x440 + state.session.node_id).toString(16).toUpperCase()}`;
   const now = performance.now();
 
   if (pendingLimitsRequest) {
@@ -321,6 +331,38 @@ function updateActuatorConfigFeedback(state, linkAlive, armed) {
       armed ? "bad" : linkAlive ? "muted" : "pending"
     }`;
   }
+
+  if (pendingVoltageLimitRequest) {
+    const target = pendingVoltageLimitRequest;
+    const matched = closeEnough(voltageLimit.voltage_limit, target.voltage_limit);
+    if (matched) {
+      stateEls.voltageLimitFeedback.textContent =
+        `Voltage limit saved: ${target.voltage_limit.toFixed(3)} V`;
+      stateEls.voltageLimitFeedback.className = "feedback good";
+      pendingVoltageLimitRequest = null;
+    } else if (!linkAlive) {
+      stateEls.voltageLimitFeedback.textContent = `Waiting for live ${voltageCanId} status.`;
+      stateEls.voltageLimitFeedback.className = "feedback pending";
+    } else if (now - target.requestedAt > 2500) {
+      stateEls.voltageLimitFeedback.textContent =
+        `Voltage limit not confirmed on ${voltageCanId}; check firmware state and CAN traffic.`;
+      stateEls.voltageLimitFeedback.className = "feedback bad";
+      pendingVoltageLimitRequest = null;
+    } else {
+      stateEls.voltageLimitFeedback.textContent =
+        `Waiting for ${voltageCanId} to confirm saved voltage limit.`;
+      stateEls.voltageLimitFeedback.className = "feedback pending";
+    }
+  } else {
+    stateEls.voltageLimitFeedback.textContent = armed
+      ? "Disarm before saving voltage limit."
+      : linkAlive
+        ? "Saving writes motor voltage_limit to FRAM."
+        : "No live CAN frames.";
+    stateEls.voltageLimitFeedback.className = `feedback ${
+      armed ? "bad" : linkAlive ? "muted" : "pending"
+    }`;
+  }
 }
 
 async function postJson(path, payload) {
@@ -370,6 +412,7 @@ function renderState(state) {
   const streamMode = state.stream.mode || null;
   const limits = state.limits || {};
   const config = state.config || {};
+  const voltageLimit = state.voltage_limit || {};
   const diagCanId = `0x${(0x5F0 + state.session.node_id).toString(16).toUpperCase()}`;
   const targetState = angleTargetState(state);
   const currentState = currentRangeState(state);
@@ -391,6 +434,7 @@ function renderState(state) {
     config.gear_ratio === null || config.gear_ratio === undefined
       ? "-"
       : `${config.gear_ratio.toFixed(3)}:1`;
+  stateEls.voltageLimitStatus.textContent = fmtNumber(voltageLimit.voltage_limit, "V");
   stateEls.angleLimitFeedback.textContent = targetState.message;
   stateEls.angleLimitFeedback.className = `feedback ${targetState.kind}`;
   stateEls.currentRangeFeedback.textContent = currentState.message;
@@ -411,7 +455,8 @@ function renderState(state) {
     `foc=${fmtBool(diag.foc_valid)}, output=${fmtBool(diag.output_cal_valid)}`;
   stateEls.actuatorConfigRaw.textContent =
     `limits 0x${(0x420 + state.session.node_id).toString(16).toUpperCase()}: ${limits.raw_hex || "-"}\n` +
-    `config 0x${(0x430 + state.session.node_id).toString(16).toUpperCase()}: ${config.raw_hex || "-"}`;
+    `config 0x${(0x430 + state.session.node_id).toString(16).toUpperCase()}: ${config.raw_hex || "-"}\n` +
+    `voltage 0x${(0x440 + state.session.node_id).toString(16).toUpperCase()}: ${voltageLimit.raw_hex || "-"}`;
   renderLog(state.logs);
 
   setButtonEnabled(controls.applySessionBtn, true);
@@ -486,6 +531,15 @@ function renderState(state) {
         ? "Gear ratio can be changed only while disarmed"
         : "Waiting for 0x437 confirmation"
   );
+  setButtonEnabled(
+    controls.saveVoltageLimitBtn,
+    linkAlive && !armed && !pendingVoltageLimitRequest,
+    !linkAlive
+      ? "No live CAN frames"
+      : armed
+        ? "Voltage limit can be changed only while disarmed"
+        : `Waiting for 0x${(0x440 + state.session.node_id).toString(16).toUpperCase()} confirmation`
+  );
 
   setActive(controls.armBtn, armed);
   setActive(controls.disarmBtn, !armed);
@@ -494,6 +548,7 @@ function renderState(state) {
   setActive(controls.stopStreamBtn, !streamEnabled);
   setPending(controls.saveLimitsBtn, !!pendingLimitsRequest);
   setPending(controls.saveGearRatioBtn, !!pendingGearRequest);
+  setPending(controls.saveVoltageLimitBtn, !!pendingVoltageLimitRequest);
 
   for (const btn of controls.profileButtons) {
     const isCurrent = btn.dataset.profile === activeProfile;
@@ -700,6 +755,28 @@ document.getElementById("saveGearRatioBtn").addEventListener("click", async () =
   })
 );
 
+document.getElementById("saveVoltageLimitBtn").addEventListener("click", async () =>
+  runAction(async () => {
+    const voltageLimit = readFiniteNumberInput("voltageLimitInput", "Voltage limit");
+    pendingVoltageLimitRequest = {
+      voltage_limit: voltageLimit,
+      requestedAt: performance.now(),
+    };
+    if (lastState) {
+      renderState(lastState);
+    }
+    try {
+      await postJson("/api/voltage_limit", {
+        voltage_limit: voltageLimit,
+      });
+      configInputsTouched = false;
+    } catch (err) {
+      pendingVoltageLimitRequest = null;
+      throw err;
+    }
+  })
+);
+
 for (const btn of document.querySelectorAll(".angle-preset")) {
   btn.addEventListener("click", () => {
     document.getElementById("angleInput").value = btn.dataset.value;
@@ -734,7 +811,7 @@ document.getElementById("velocityInput").addEventListener("input", () => {
   );
 });
 
-for (const id of ["outputMinInput", "outputMaxInput", "gearRatioInput"]) {
+for (const id of ["outputMinInput", "outputMaxInput", "gearRatioInput", "voltageLimitInput"]) {
   document.getElementById(id).addEventListener("input", () => {
     configInputsTouched = true;
   });

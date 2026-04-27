@@ -23,6 +23,7 @@ bool actuatorConfigEquals_(const ActuatorConfig& a, const ActuatorConfig& b) {
          nearlyEqual_(a.output_max_deg, b.output_max_deg) &&
          a.enable_velocity_mode == b.enable_velocity_mode &&
          a.enable_output_angle_mode == b.enable_output_angle_mode &&
+         nearlyEqual_(a.voltage_limit, b.voltage_limit) &&
          a.can_node_id == b.can_node_id;
 }
 
@@ -58,11 +59,12 @@ void applyOutputProfileDefaults(ActuatorConfig& cfg, OutputEncoderType profile) 
 
 ActuatorConfig buildDefaultActuatorConfig() {
   ActuatorConfig cfg = {};
-  cfg.version = 2;
+  cfg.version = 3;
   cfg.gear_ratio = GEAR_RATIO;
-  cfg.motor_to_output_sign = 1;
+  cfg.motor_to_output_sign = MOTOR_TO_OUTPUT_SIGN;
   cfg.output_min_deg = kFirmwareDefaultOutputMinDeg;
   cfg.output_max_deg = kFirmwareDefaultOutputMaxDeg;
+  cfg.voltage_limit = TORQUE_LIMIT_VOLTS;
   cfg.can_node_id = CAN_NODE_ID;
 
 #ifndef BUILD_DEFAULT_OUTPUT_ENCODER_TYPE

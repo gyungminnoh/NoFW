@@ -183,62 +183,21 @@ score = dx^2 + dy^2 + dz^2
 
 ## 4. 정확도 검증 방법
 
-### 4.1 검증 펌웨어
+이 섹션의 수치는 과거 전용 검증 펌웨어와 CAN 로그 분석으로 얻은 historical
+summary다. 해당 일회성 test firmware, 분석 스크립트, raw log/plot 산출물은
+active repository surface에서 제거되었고, 현재 유지되는 경로는 메인 펌웨어와
+`tmag_calibration_runner_f446re`다.
 
-정확도 검증은 메인 펌웨어가 아니라 전용 테스트 펌웨어에서 수행했다.
-
-사용 환경:
-
-- `tmag_lut_angle_test_f446re`
-
-관련 파일:
-
-- [src/tmag_lut_angle_test/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/tmag_lut_angle_test/main.cpp)
-
-### 4.2 검증 절차
-
-검증 절차는 다음과 같다.
-
-1. 부팅 후 일정 시간 대기
-2. 모터를 저속으로 자동 회전
-3. 첫 번째 출력축 회전 구간에서 LUT 학습
-4. 두 번째 출력축 회전 구간에서 LUT 검증
-5. 검증 중 각 샘플마다:
-   - `AS5600` 출력축 기준각
-   - `TMAG LUT` 추정각
-   - 두 값의 오차
-   를 CAN으로 송신
-
-즉 검증 구조는:
+과거 검증 구조는 다음과 같았다.
 
 - 학습(reference): `AS5600`
 - 추정(estimation): `TMAG5170 + AS5048A + LUT`
-- 비교 대상: `AS5600 기준 출력축 각도`
+- 비교 대상: `AS5600` 기준 출력축 각도
+- 분석 지표: `RMS`, `MAE`, max absolute error, p95 absolute error, bias,
+  stddev, residual harmonic
 
-### 4.3 로그 분석 방식
-
-테스트 펌웨어가 송신한 CAN 로그는 다음 스크립트로 분석했다.
-
-- [tools/analyze_tmag_lut_error.py](/home/gyungminnoh/projects/NoFW/NoFW/tools/analyze_tmag_lut_error.py)
-
-분석 지표:
-
-- `RMS error`
-- `MAE`
-- `max absolute error`
-- `95 percentile absolute error`
-- `bias`
-- `stddev`
-- 잔류 고조파(`1x`, `8x`)
-
-검증 로그와 산출물:
-
-- 로그:
-  [capture/tmag_lut_candidate_restricted_v2.log](/home/gyungminnoh/projects/NoFW/NoFW/capture/tmag_lut_candidate_restricted_v2.log)
-- 그래프:
-  [capture/tmag_lut_candidate_restricted_v2_analysis.svg](/home/gyungminnoh/projects/NoFW/NoFW/capture/tmag_lut_candidate_restricted_v2_analysis.svg)
-- CSV:
-  [capture/tmag_lut_candidate_restricted_v2_analysis.csv](/home/gyungminnoh/projects/NoFW/NoFW/capture/tmag_lut_candidate_restricted_v2_analysis.csv)
+현재 새 검증을 수행해야 한다면 raw artifact를 `docs/`에 직접 추가하지 말고,
+일시 capture로 보관한 뒤 유지할 결론만 Markdown 보고서에 정리한다.
 
 ## 5. 검증 결과
 

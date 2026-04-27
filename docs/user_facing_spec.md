@@ -1,6 +1,6 @@
 # NoFW User-Facing Specification
 
-Spec version: `1.1.0`
+Spec version: `1.2.0`
 
 이 문서는 NoFW 액추에이터 펌웨어의 외부 사용자 계약이다.
 상위 제어기, 테스트 장비, 운영자가 의존해도 되는 CAN 프로토콜, 보드 ID, 기본 운용 절차만 정의한다.
@@ -41,6 +41,7 @@ Spec version: `1.1.0`
   - angle: `int32 mdeg`
   - velocity: `int32 mdeg/s`
   - gear ratio: `int32`, scale `0.001`
+  - voltage limit: `int32 mV`
 
 Examples:
 
@@ -77,6 +78,7 @@ Default driving configuration:
 
 - Profile: `VelocityOnly`
 - Gear ratio: `5.200`
+- Voltage limit: `30.000 V`
 - Control capability: velocity only
 
 ## Frame ID Contract
@@ -91,6 +93,7 @@ For every frame below, `node_id` is the deployed node ID.
 | TX | output velocity status | `0x410 + node_id` |
 | TX | actuator travel limits status | `0x420 + node_id` |
 | TX | actuator config status | `0x430 + node_id` |
+| TX | actuator voltage limit status | `0x440 + node_id` |
 | RX | output profile command | `0x220 + node_id` |
 | RX | power-stage command | `0x230 + node_id` |
 | RX | travel limits config command | `0x240 + node_id` |
@@ -99,6 +102,7 @@ For every frame below, `node_id` is the deployed node ID.
 | RX | output encoder direction auto-calibration | `0x270 + node_id` |
 | RX | output encoder zero capture | `0x280 + node_id` |
 | RX | FOC calibration command | `0x290 + node_id` |
+| RX | voltage limit config command | `0x2A0 + node_id` |
 | TX | runtime diagnostic | `0x5F0 + node_id` |
 
 ## Enums

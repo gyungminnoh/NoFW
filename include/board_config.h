@@ -46,16 +46,16 @@ static constexpr float ALIGN_VOLTAGE  = BUILD_ALIGN_VOLTAGE;
 #endif
 static constexpr float GEAR_RATIO = BUILD_GEAR_RATIO;
 
+// =================== Motor/output direction ===================
+#ifndef BUILD_MOTOR_TO_OUTPUT_SIGN
+#define BUILD_MOTOR_TO_OUTPUT_SIGN 1
+#endif
+static_assert(BUILD_MOTOR_TO_OUTPUT_SIGN == 1 || BUILD_MOTOR_TO_OUTPUT_SIGN == -1,
+              "BUILD_MOTOR_TO_OUTPUT_SIGN must be 1 or -1");
+static constexpr int8_t MOTOR_TO_OUTPUT_SIGN =
+    static_cast<int8_t>(BUILD_MOTOR_TO_OUTPUT_SIGN);
+
 // =================== Actuator travel ===================
-// Motor shaft max travel, in turns.
-static constexpr float ACTUATOR_MOTOR_TURNS = 48.0f;
-// Motor travel range in radians.
-static constexpr float ACTUATOR_MOTOR_MAX_RAD = ACTUATOR_MOTOR_TURNS * 2.0f * 3.1415926f;
-// Output angle range in radians (output shaft reference).
-static constexpr float ACTUATOR_OUTPUT_MAX_RAD = ACTUATOR_MOTOR_MAX_RAD / GEAR_RATIO;
-// Output angle range in degrees (output shaft reference).
-static constexpr float ACTUATOR_OUTPUT_MAX_DEG =
-    ACTUATOR_OUTPUT_MAX_RAD * (180.0f / 3.1415926f);
 // Default deployed travel limits for this board build.
 static constexpr float ACTUATOR_OUTPUT_DEFAULT_MIN_DEG = -120.0f;
 static constexpr float ACTUATOR_OUTPUT_DEFAULT_MAX_DEG = 120.0f;
@@ -86,6 +86,8 @@ static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_CONFIG_CMD_BASE = 0x260;
 static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_AUTO_CAL_CMD_BASE = 0x270;
 static constexpr uint16_t CAN_ID_OUTPUT_ENCODER_ZERO_CMD_BASE = 0x280;
 static constexpr uint16_t CAN_ID_FOC_CALIBRATION_CMD_BASE = 0x290;
+static constexpr uint16_t CAN_ID_ACTUATOR_VOLTAGE_LIMIT_CONFIG_CMD_BASE = 0x2A0;
+static constexpr uint16_t CAN_ID_ACTUATOR_VOLTAGE_LIMIT_STATUS_BASE = 0x440;
 
 // CAN uses the board's default CAN1 pin mapping provided by the STM32 core.
 // Transceiver: SN65HVD230 (no SW control unless STB/RS wired to MCU)

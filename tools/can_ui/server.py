@@ -62,6 +62,8 @@ MAX_CLASSIC_CAN_DLC = 8
 MAX_COMMAND_ABS_VALUE = 1_000_000.0
 MIN_GEAR_RATIO = 0.001
 MAX_GEAR_RATIO = 1000.0
+MIN_VOLTAGE_LIMIT = 0.001
+MAX_VOLTAGE_LIMIT = 40.0
 DISARM_REPEAT_COUNT = 3
 DISARM_REPEAT_DELAY_S = 0.02
 
@@ -130,6 +132,15 @@ def ensure_gear_ratio(value: Any) -> float:
     return gear_ratio
 
 
+def ensure_voltage_limit(value: Any) -> float:
+    voltage_limit = ensure_finite_command_value(value, "voltage_limit")
+    if voltage_limit < MIN_VOLTAGE_LIMIT or voltage_limit > MAX_VOLTAGE_LIMIT:
+        raise ValueError(
+            f"voltage_limit must be between {MIN_VOLTAGE_LIMIT:g} and {MAX_VOLTAGE_LIMIT:g}"
+        )
+    return voltage_limit
+
+
 @dataclass
 class SessionConfig:
     can_iface: str
@@ -150,6 +161,7 @@ class CanUiBridge:
         self._latest_velocity_deg_s: Optional[float] = None
         self._latest_limits: dict[str, Any] = {}
         self._latest_config: dict[str, Any] = {}
+        self._latest_voltage_limit: dict[str, Any] = {}
         self._latest_diag: dict[str, Any] = {}
         self._last_frame_time: Optional[float] = None
         self._last_error: Optional[str] = None
@@ -208,6 +220,7 @@ class CanUiBridge:
             self._latest_velocity_deg_s = None
             self._latest_limits = {}
             self._latest_config = {}
+            self._latest_voltage_limit = {}
             self._latest_diag = {}
             self._last_frame_time = None
             self._last_error = None
@@ -223,6 +236,7 @@ class CanUiBridge:
         velocity_id = frame_id(0x410, cfg.node_id)
         limits_id = frame_id(0x420, cfg.node_id)
         config_id = frame_id(0x430, cfg.node_id)
+        voltage_limit_id = frame_id(0x440, cfg.node_id)
         diag_id = frame_id(0x5F0, cfg.node_id)
         return [
             "candump",
@@ -231,6 +245,7 @@ class CanUiBridge:
             f"{cfg.can_iface},{velocity_id:03X}:7FF",
             f"{cfg.can_iface},{limits_id:03X}:7FF",
             f"{cfg.can_iface},{config_id:03X}:7FF",
+            f"{cfg.can_iface},{voltage_limit_id:03X}:7FF",
             f"{cfg.can_iface},{diag_id:03X}:7FF",
         ]
 
@@ -287,6 +302,7 @@ class CanUiBridge:
         velocity_id = frame_id(0x410, cfg.node_id)
         limits_id = frame_id(0x420, cfg.node_id)
         config_id = frame_id(0x430, cfg.node_id)
+        voltage_limit_id = frame_id(0x440, cfg.node_id)
         diag_id = frame_id(0x5F0, cfg.node_id)
 
         with self._lock:
@@ -302,6 +318,9 @@ class CanUiBridge:
             elif can_id == config_id:
                 self._latest_config = self._decode_config(payload_hex)
                 self._latest_config["raw_hex"] = payload_hex
+            elif can_id == voltage_limit_id:
+                self._latest_voltage_limit = self._decode_voltage_limit(payload_hex)
+                self._latest_voltage_limit["raw_hex"] = payload_hex
             elif can_id == diag_id:
                 self._latest_diag = self._decode_diag(payload_hex)
                 self._latest_diag["raw_hex"] = payload_hex
@@ -332,6 +351,12 @@ class CanUiBridge:
             ),
             "enable_velocity_mode": bool(flags & 0x01),
             "enable_output_angle_mode": bool(flags & 0x02),
+        }
+
+    def _decode_voltage_limit(self, payload_hex: str) -> dict[str, Any]:
+        voltage_limit = decode_milli_units(payload_hex)
+        return {
+            "voltage_limit": voltage_limit,
         }
 
     def _decode_diag(self, payload_hex: str) -> dict[str, Any]:
@@ -403,6 +428,11 @@ class CanUiBridge:
         if frame_type == "actuator_gear":
             return (
                 f"{frame_id(0x250, cfg.node_id):03X}",
+                encode_milli_units(float(value)),
+            )
+        if frame_type == "actuator_voltage_limit":
+            return (
+                f"{frame_id(0x2A0, cfg.node_id):03X}",
                 encode_milli_units(float(value)),
             )
         raise ValueError(f"unsupported frame type: {frame_type}")
@@ -503,6 +533,16 @@ class CanUiBridge:
         self.send_one_shot("actuator_gear", gear_ratio)
         self.log("info", f"Requested gear ratio = {gear_ratio:.3f}:1")
 
+    def set_actuator_voltage_limit(self, voltage_limit: float) -> None:
+        voltage_limit = ensure_voltage_limit(voltage_limit)
+        self._require_disarmed("voltage limit config")
+        with self._lock:
+            self._command_mode = None
+            self._command_value = 0.0
+            self._stream_enabled = False
+        self.send_one_shot("actuator_voltage_limit", voltage_limit)
+        self.log("info", f"Requested voltage limit = {voltage_limit:.3f} V")
+
     def set_angle_target(self, angle_deg: float) -> None:
         angle_deg = ensure_finite_command_value(angle_deg, "angle")
         with self._lock:
@@ -580,6 +620,7 @@ class CanUiBridge:
                 "velocity_deg_s": self._latest_velocity_deg_s,
                 "limits": self._latest_limits,
                 "config": self._latest_config,
+                "voltage_limit": self._latest_voltage_limit,
                 "diag": self._latest_diag,
                 "stream": {
                     "enabled": self._stream_enabled,
@@ -635,6 +676,9 @@ class UiRequestHandler(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/gear_ratio":
             self.bridge.set_actuator_gear_ratio(body["gear_ratio"])
+            return {"ok": True}
+        if path == "/api/voltage_limit":
+            self.bridge.set_actuator_voltage_limit(body["voltage_limit"])
             return {"ok": True}
         if path == "/api/angle":
             self.bridge.set_angle_target(float(body["deg"]))

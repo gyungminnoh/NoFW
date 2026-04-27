@@ -18,4 +18,5 @@ namespace CanService {
   bool takePendingOutputEncoderAutoCalibration(OutputEncoderType& out_encoder_type);
   bool takePendingOutputEncoderZeroCapture(OutputEncoderType& out_encoder_type);
   bool takePendingFocCalibration();
+  bool takePendingActuatorVoltageLimitConfig(float& out_voltage_limit);
 }

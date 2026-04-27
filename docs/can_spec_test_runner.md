@@ -32,7 +32,7 @@ python3 tools/can_spec_test.py --protocol-only
 JSON 리포트를 남기려면:
 
 ```bash
-python3 tools/can_spec_test.py --iface can0 --node-id 7 --report docs/can_spec_test_latest.json
+python3 tools/can_spec_test.py --iface can0 --node-id 7 --report /tmp/nofw_can_spec_report.json
 ```
 
 ## Power Stage Tests

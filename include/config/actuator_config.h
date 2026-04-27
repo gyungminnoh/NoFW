@@ -5,7 +5,7 @@
 #include "config/actuator_types.h"
 
 struct ActuatorConfig {
-  uint32_t version = 2;
+  uint32_t version = 3;
 
   OutputEncoderType output_encoder_type = OutputEncoderType::As5600;
   ControlMode default_control_mode = ControlMode::OutputAngle;
@@ -18,6 +18,7 @@ struct ActuatorConfig {
 
   bool enable_velocity_mode = true;
   bool enable_output_angle_mode = true;
+  float voltage_limit = 12.0f;
 
   uint8_t can_node_id = 7;
 };

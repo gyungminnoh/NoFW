@@ -68,6 +68,8 @@ MAX_CLASSIC_DLC = 8
 MAX_ABS_COMMAND_VALUE = 1_000_000.0
 MIN_GEAR_RATIO = 0.001
 MAX_GEAR_RATIO = 1000.0
+MIN_VOLTAGE_LIMIT = 0.001
+MAX_VOLTAGE_LIMIT = 40.0
 
 
 def frame_id(base: int, node_id: int) -> int:
@@ -205,12 +207,21 @@ def decode_config(payload_hex: str) -> dict[str, Any]:
     }
 
 
+def decode_voltage_limit(payload_hex: str) -> dict[str, float]:
+    if len(bytes.fromhex(payload_hex)) != 4:
+        raise ValueError("voltage limit status must be DLC 4")
+    return {
+        "voltage_limit": decode_milli(payload_hex, 0),
+    }
+
+
 @dataclass
 class Snapshot:
     angle_deg: float | None = None
     velocity_deg_s: float | None = None
     limits: dict[str, float] | None = None
     config: dict[str, Any] | None = None
+    voltage_limit: dict[str, float] | None = None
     diag: dict[str, Any] | None = None
     frames_seen: dict[int, int] = field(default_factory=dict)
 
@@ -242,6 +253,8 @@ class CanSession:
             "encoder_auto_cal_cmd": frame_id(0x270, node),
             "encoder_zero_cmd": frame_id(0x280, node),
             "foc_cal_cmd": frame_id(0x290, node),
+            "voltage_limit_cmd": frame_id(0x2A0, node),
+            "voltage_limit_status": frame_id(0x440, node),
             "diag": frame_id(0x5F0, node),
         }
 
@@ -251,6 +264,7 @@ class CanSession:
             f"{self.iface},{self.ids['velocity_status']:03X}:7FF",
             f"{self.iface},{self.ids['limits_status']:03X}:7FF",
             f"{self.iface},{self.ids['config_status']:03X}:7FF",
+            f"{self.iface},{self.ids['voltage_limit_status']:03X}:7FF",
             f"{self.iface},{self.ids['diag']:03X}:7FF",
         ]
         self._proc = subprocess.Popen(
@@ -318,6 +332,9 @@ class CanSession:
     def send_velocity(self, velocity_deg_s: float) -> None:
         self.send(self.ids["velocity_cmd"], encode_milli(velocity_deg_s))
 
+    def send_voltage_limit(self, voltage_limit: float) -> None:
+        self.send(self.ids["voltage_limit_cmd"], encode_milli(voltage_limit))
+
     def drain(self) -> None:
         while True:
             try:
@@ -333,6 +350,7 @@ class CanSession:
             self.ids["velocity_status"],
             self.ids["limits_status"],
             self.ids["config_status"],
+            self.ids["voltage_limit_status"],
             self.ids["diag"],
         }
         while time.time() < deadline:
@@ -349,6 +367,8 @@ class CanSession:
                 snapshot.limits = decode_limits(frame.payload_hex)
             elif frame.can_id == self.ids["config_status"]:
                 snapshot.config = decode_config(frame.payload_hex)
+            elif frame.can_id == self.ids["voltage_limit_status"]:
+                snapshot.voltage_limit = decode_voltage_limit(frame.payload_hex)
             elif frame.can_id == self.ids["diag"]:
                 snapshot.diag = decode_diag(frame.payload_hex)
             if required.issubset(snapshot.frames_seen.keys()):
@@ -364,6 +384,8 @@ class CanSession:
                 last.diag = snap.diag
             if snap.config is not None:
                 last.config = snap.config
+            if snap.voltage_limit is not None:
+                last.voltage_limit = snap.voltage_limit
             if snap.limits is not None:
                 last.limits = snap.limits
             if snap.angle_deg is not None:
@@ -383,6 +405,7 @@ class SpecRunner:
         self.session: CanSession | None = None
         self.original_limits: dict[str, float] | None = None
         self.original_config: dict[str, Any] | None = None
+        self.original_voltage_limit: dict[str, float] | None = None
         self.original_profile_code: int | None = None
 
     def check(self, name: str, fn: Callable[[], Any]) -> None:
@@ -426,6 +449,8 @@ class SpecRunner:
             "encoder_auto_cal_cmd": 0x270 + node,
             "encoder_zero_cmd": 0x280 + node,
             "foc_cal_cmd": 0x290 + node,
+            "voltage_limit_cmd": 0x2A0 + node,
+            "voltage_limit_status": 0x440 + node,
             "diag": 0x5F0 + node,
         }
         for name, can_id in expected.items():
@@ -485,7 +510,10 @@ class SpecRunner:
             raise AssertionError(config)
         if not config["enable_velocity_mode"] or not config["enable_output_angle_mode"]:
             raise AssertionError(config)
-        return "0x420/0x430 payloads decoded"
+        voltage_limit = decode_voltage_limit("30750000")
+        if voltage_limit != {"voltage_limit": 30.0}:
+            raise AssertionError(voltage_limit)
+        return "0x420/0x430/0x440 payloads decoded"
 
     def _test_validators(self) -> str:
         validate_iface("can0")
@@ -519,6 +547,7 @@ class SpecRunner:
             self.check("disarm command is idempotent", self._test_disarm_idempotent)
             self.check("actuator limits config roundtrip", self._test_limits_roundtrip)
             self.check("gear ratio config roundtrip", self._test_gear_roundtrip)
+            self.check("voltage limit config roundtrip", self._test_voltage_limit_roundtrip)
             self.check("current profile command succeeds while disarmed", self._test_current_profile_roundtrip)
             self.check("invalid profile command is ignored", self._test_invalid_profile_ignored)
             if self.args.allow_arm:
@@ -545,17 +574,19 @@ class SpecRunner:
     def _test_live_status(self) -> str:
         session = self._require_session()
         snapshot = session.wait_for(
-            lambda snap: snap.diag is not None and snap.limits is not None and snap.config is not None,
+            lambda snap: snap.diag is not None and snap.limits is not None and snap.config is not None and snap.voltage_limit is not None,
             self.args.timeout,
-            "diag + limits + config",
+            "diag + limits + config + voltage_limit",
         )
         self.original_limits = dict(snapshot.limits or {})
         self.original_config = dict(snapshot.config or {})
+        self.original_voltage_limit = dict(snapshot.voltage_limit or {})
         self.original_profile_code = int(snapshot.diag["stored_profile_code"])
         return (
             f"profile={snapshot.diag['active_profile']}, armed={snapshot.diag['armed']}, "
             f"limits={snapshot.limits['output_min_deg']:.3f}..{snapshot.limits['output_max_deg']:.3f}, "
-            f"gear={snapshot.config['gear_ratio']:.3f}"
+            f"gear={snapshot.config['gear_ratio']:.3f}, "
+            f"voltage={snapshot.voltage_limit['voltage_limit']:.3f} V"
         )
 
     def _test_runtime_status_consistency(self) -> str:
@@ -572,6 +603,10 @@ class SpecRunner:
             gear = snap.config["gear_ratio"]
             if not (MIN_GEAR_RATIO <= gear <= MAX_GEAR_RATIO):
                 raise AssertionError(f"gear ratio out of range: {gear}")
+        if snap.voltage_limit is not None:
+            voltage_limit = snap.voltage_limit["voltage_limit"]
+            if not (MIN_VOLTAGE_LIMIT <= voltage_limit <= MAX_VOLTAGE_LIMIT):
+                raise AssertionError(f"voltage limit out of range: {voltage_limit}")
         return f"angle={snap.angle_deg:.3f} deg, velocity={snap.velocity_deg_s:.3f} deg/s"
 
     def _test_disarm_idempotent(self) -> str:
@@ -637,6 +672,28 @@ class SpecRunner:
             "restored gear ratio",
         )
         return f"{snap.config['gear_ratio']:.3f}, restored {original_gear:.3f}"
+
+    def _test_voltage_limit_roundtrip(self) -> str:
+        session = self._require_session()
+        assert self.original_voltage_limit is not None
+        original_voltage = float(self.original_voltage_limit["voltage_limit"])
+        test_voltage = 30.0 if abs(original_voltage - 30.0) > 0.01 else 29.5
+        session.send_power(False)
+        session.send_voltage_limit(test_voltage)
+        snap = session.wait_for(
+            lambda s: s.voltage_limit is not None
+            and abs(s.voltage_limit["voltage_limit"] - test_voltage) <= 0.002,
+            self.args.timeout,
+            "temporary voltage limit",
+        )
+        session.send_voltage_limit(original_voltage)
+        session.wait_for(
+            lambda s: s.voltage_limit is not None
+            and abs(s.voltage_limit["voltage_limit"] - original_voltage) <= 0.002,
+            self.args.timeout,
+            "restored voltage limit",
+        )
+        return f"{snap.voltage_limit['voltage_limit']:.3f} V, restored {original_voltage:.3f} V"
 
     def _test_current_profile_roundtrip(self) -> str:
         session = self._require_session()

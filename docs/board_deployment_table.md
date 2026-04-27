@@ -12,7 +12,7 @@
 
 - steering: `S01` ~ `S04`
 - driving: `D01` ~ `D04`
-- gripper: `G01`
+- auxiliary angle actuator: `G01`
 
 wheel 위치 표기는 다음을 기준으로 한다.
 
@@ -35,7 +35,7 @@ wheel 위치 표기는 다음을 기준으로 한다.
 | `D02` | `BR` | driving back-right | `6` | velocity cmd `0x216`, velocity status `0x416` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
 | `D03` | `FL` | driving front-left | `7` | velocity cmd `0x217`, velocity status `0x417` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
 | `D04` | `BL` | driving back-left | `8` | velocity cmd `0x218`, velocity status `0x418` | `VelocityOnly` | velocity only | `78:15` | not used | no output absolute encoder required | driving group |
-| `G01` | `-` | gripper | `31` | reserved | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | not released in user-facing spec `1.0.0` |
+| `G01` | `-` | auxiliary angle actuator | `31` | reserved | `As5600` | angle + velocity | `30:1` | `0 ~ 90` | boot zero by `AS5600`, runtime feedback by `AS5048A` multi-turn | not released in user-facing spec `1.0.0` |
 
 ## 적용 규칙
 
@@ -43,16 +43,16 @@ wheel 위치 표기는 다음을 기준으로 한다.
 
 - `CAN_NODE_ID`: 위 표의 `planned node_id`
 - profile:
-  - steering, gripper: `As5600`
+  - steering, auxiliary angle actuator: `As5600`
   - driving: `VelocityOnly`
 - gear ratio:
   - steering: `50.0`
   - driving: `78.0 / 15.0`에 해당하는 비율
-  - gripper: `30.0`
+  - auxiliary angle actuator: `30.0`
 - output travel limits:
   - steering: `output_min_deg = -120`, `output_max_deg = 120`
   - driving: not used in `VelocityOnly`
-  - gripper: `output_min_deg = 0`, `output_max_deg = 90`
+  - auxiliary angle actuator: `output_min_deg = 0`, `output_max_deg = 90`
 
 주의:
 
@@ -87,4 +87,4 @@ wheel 위치 표기는 다음을 기준으로 한다.
 
 - 최종 물리 라벨 또는 시리얼 번호
 - 실제 장착 위치 이름
-- gripper의 실제 가동 범위와 초기 zero 기준 작업 절차
+- auxiliary angle actuator의 실제 가동 범위와 초기 zero 기준 작업 절차

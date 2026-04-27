@@ -74,6 +74,18 @@
 
       <section class="panel grid-two">
         <div>
+          <h2>Voltage Limit</h2>
+          <label>Motor Voltage Limit <input id="voltageLimitInput" type="number" step="0.001" value="12" /></label>
+          <button id="saveVoltageLimitBtn" class="primary">Save Voltage Limit</button>
+          <p id="voltageLimitFeedback" class="feedback muted">
+            Voltage limit changes are saved to FRAM and applied while disarmed.
+          </p>
+        </div>
+        <div></div>
+      </section>
+
+      <section class="panel grid-two">
+        <div>
           <h2>Angle Command</h2>
           <label>Target Deg <input id="angleInput" type="number" step="0.001" value="10" /></label>
           <p id="angleLimitFeedback" class="feedback muted">Waiting for travel limits.</p>
@@ -130,6 +142,7 @@
               <tr><th>Output Min</th><td id="outputMinStatus" class="mono">-</td></tr>
               <tr><th>Output Max</th><td id="outputMaxStatus" class="mono">-</td></tr>
               <tr><th>Gear Ratio</th><td id="gearRatioStatus" class="mono">-</td></tr>
+              <tr><th>Voltage Limit</th><td id="voltageLimitStatus" class="mono">-</td></tr>
               <tr><th>Stored Profile</th><td id="storedProfile" class="mono">-</td></tr>
               <tr><th>Active Profile</th><td id="activeProfile" class="mono">-</td></tr>
               <tr><th>Default Mode</th><td id="defaultMode" class="mono">-</td></tr>
@@ -156,6 +169,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=8"></script>
   </body>
-  </html>
+</html>

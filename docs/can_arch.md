@@ -118,7 +118,7 @@ angle와 velocity는 서로 다른 ID를 사용한다.
 
 ## Why This Changed
 
-예전 구조는 그리퍼 `% open` 중심이어서:
+예전 구조는 제품별 percentage 명령 중심이어서:
 
 - 액추에이터 일반화가 어렵고
 - `1:1` direct-drive 경로를 표현하기 어렵고

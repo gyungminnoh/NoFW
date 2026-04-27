@@ -1,368 +1,187 @@
 # NoFW
 
-STM32F446RE 기반의 그리퍼 펌웨어 프로젝트입니다.  
-이 저장소는 `SimpleFOC`, `AS5048A` 모터 엔코더, `AS5600` 절대각 센서, `CAN` 통신을 묶어
-부팅 시 기준점을 잡고, 외부 CAN 명령으로 그리퍼 개폐율을 제어하는 펌웨어를 포함합니다.
+STM32F446RE 기반의 actuator-generic BLDC 펌웨어입니다. 이 저장소는
+`SimpleFOC`, `AS5048A` 입력축 엔코더, 선택 가능한 출력축 엔코더
+(`AS5600`, `TMAG5170 LUT`, `DirectInput`), 외장 FRAM, CAN 프로토콜을 묶어
+출력축 기준 angle / velocity 제어를 제공합니다.
 
-## 구성 요약
+현재 설계 기준은 제품별 percentage API가 아니라 actuator 공통 단위입니다.
 
-- 메인 제품 펌웨어: `src/main.cpp`
-- 사용자 facing 고정 스펙: `docs/user_facing_spec.md`
-- CAN 프로토콜 문서: `docs/can_protocol.md`
-- CAN 계층 구조 문서: `docs/can_arch.md`
-- 보드/핀/동작 상수: `include/board_config.h`
+- 출력각: `deg`
+- 출력속도: `deg/s`
+- CAN wire payload: `mdeg`, `mdeg/s`
+- runtime config / calibration 저장소: `FM25CL64B-G` SPI FRAM
 
-프로젝트는 크게 아래 계층으로 나뉩니다.
+## Active Firmware
 
-- 센서 계층: `AS5048A` 읽기, `AS5600` 부트 기준점 읽기
-- 상태 추정 계층: single-turn 센서를 multi-turn 각도로 변환
-- 제어 계층: 목표 위치를 속도 명령으로 변환
-- CAN 계층: transport / protocol / service 분리
-- 애플리케이션 계층: 부팅, 캘리브레이션, 목표 개폐율 적용
+지원하는 active PlatformIO build target은 아래입니다.
 
-## 주요 파일
+- `custom_f446re_s01`
+- `custom_f446re_s02`
+- `custom_f446re_s03`
+- `custom_f446re_s04`
+- `custom_f446re_d01`
+- `custom_f446re_d02`
+- `custom_f446re_d03`
+- `custom_f446re_d04`
+- `tmag_calibration_runner_f446re`
 
-- [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp): 실제 그리퍼 제어 펌웨어 엔트리 포인트
-- [include/app.h](/home/gyungminnoh/projects/NoFW/NoFW/include/app.h): 메인 펌웨어용 공용 include 묶음
-- [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h): 핀, 전압, 기어비, CAN ID, 토크 제한 등 전체 설정
-- [include/as5048a_custom_sensor.h](/home/gyungminnoh/projects/NoFW/NoFW/include/as5048a_custom_sensor.h): AS5048A를 SimpleFOC `Sensor`로 감싼 구현
-- [src/as5600_bootstrap.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/as5600_bootstrap.cpp): AS5600 절대각을 여러 번 읽어 안정적인 기준값을 얻는 코드
-- [include/multi_turn_estimator.h](/home/gyungminnoh/projects/NoFW/NoFW/include/multi_turn_estimator.h): 각도 unwrap으로 multi-turn 위치를 추정
-- [include/position_velocity_controller.h](/home/gyungminnoh/projects/NoFW/NoFW/include/position_velocity_controller.h): 외부 위치 제어기
-- [include/gripper_api.h](/home/gyungminnoh/projects/NoFW/NoFW/include/gripper_api.h), [src/gripper_api.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/gripper_api.cpp): open percent와 실제 출력각/모터 multi-turn 좌표 변환
-- [include/can_transport.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_transport.h), [src/can_transport.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_transport.cpp): CAN 하드웨어 접근
-- [include/can_protocol.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_protocol.h), [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp): CAN 프레임 포맷 정의
-- [include/can_service.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_service.h), [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp): CAN 명령 반영, timeout 정책, 위치 보고
+`custom_f446re_*` 계열은 메인 actuator firmware입니다.
+`tmag_calibration_runner_f446re`는 `TmagLut` runtime profile에 필요한 LUT
+calibration을 생성하고 FRAM에 저장하는 전용 펌웨어입니다.
 
-## 실행 흐름
+과거 FRAM/TMAG 단품 진단 펌웨어와 일회성 test firmware는 active workflow에서
+제거되었습니다. 하드웨어 bring-up용 임시 진단이 다시 필요하면 현재
+`can_transport`, `fm25cl64b_fram`, `tmag5170_spi`, `ConfigStore`를 기준으로 새
+maintenance tool을 별도 목적에 맞게 추가하세요.
 
-메인 펌웨어의 부팅 순서는 대략 아래와 같습니다.
+## Main Layout
 
-1. SPI, CAN, 드라이버, 모터를 초기화합니다.
-2. 외장 SPI FRAM의 trusted calibration slot에서 모터 FOC 캘리브레이션 정보와 AS5600 기준값을 읽습니다.
-3. trusted calibration이 없으면 `initFOC()`와 현재 출력축 기준값을 새 trusted slot에 저장합니다.
-4. 현재 모터 각도를 기준으로 multi-turn 추정을 리셋합니다.
-5. AS5600 절대각을 읽어 출력축 기준 0점을 정의합니다.
-6. 이후 `loop()`에서:
-   - `motor.loopFOC()`
-   - 센서 업데이트 및 multi-turn 위치 계산
-   - CAN 명령 수신
-   - 목표 open percent를 목표 출력각으로 변환
-   - 위치 오차를 속도 명령으로 변환
-   - `motor.move(vel_cmd)` 적용
+- [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp): 메인 펌웨어 entrypoint
+- [include/app.h](/home/gyungminnoh/projects/NoFW/NoFW/include/app.h): 메인 펌웨어 공용 include 묶음
+- [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h): 핀, 전압, 기본 gear/profile, PID, CAN node build default
+- [include/actuator_api.h](/home/gyungminnoh/projects/NoFW/NoFW/include/actuator_api.h): actuator angle/velocity/limit 변환 API
+- [include/can_protocol.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_protocol.h), [src/can_protocol.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_protocol.cpp): CAN frame encode/decode
+- [include/can_service.h](/home/gyungminnoh/projects/NoFW/NoFW/include/can_service.h), [src/can_service.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/can_service.cpp): CAN command/status service
+- [include/storage/config_store.h](/home/gyungminnoh/projects/NoFW/NoFW/include/storage/config_store.h), [src/storage/config_store.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/storage/config_store.cpp): FRAM-backed config/calibration store
+- [include/sensors/output_encoder_manager.h](/home/gyungminnoh/projects/NoFW/NoFW/include/sensors/output_encoder_manager.h): runtime output encoder selection
+- [src/tmag_calibration_runner/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/tmag_calibration_runner/main.cpp): TMAG LUT calibration firmware
 
-버튼 길게 누르기로 런타임 캘리브레이션, FRAM 저장값 클리어, 수동 zero 지정 모드도 수행할 수 있습니다.
+관련 문서:
 
-## 빌드
+- [agents.md](/home/gyungminnoh/projects/NoFW/NoFW/agents.md): future agent 운영 규칙
+- [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md): CAN protocol
+- [docs/firmware_user_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/firmware_user_guide.md): firmware/user workflow
+- [docs/board_deployment_table.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/board_deployment_table.md): board deployment mapping
+- [docs/tmag_output_encoder_report.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/tmag_output_encoder_report.md): TMAG LUT design notes
 
-`platformio.ini`에는 메인 펌웨어와 유지보수용 진단 펌웨어가 함께 들어 있습니다.
+## Runtime Profiles
 
-- `custom_f446re`: 메인 그리퍼 펌웨어
-- `fram_test_f446re`: 외장 FRAM 유지보수용 진단 펌웨어
-- `tmag_comm_test_f446re`: TMAG5170 통신 확인용 진단 펌웨어
-- `tmag_sensor_test_f446re`: TMAG5170 센서 동작 확인용 진단 펌웨어
-- `tmag_xyz_live_test_f446re`: 손으로 축을 돌리며 TMAG5170 XYZ 값을 실시간 확인하는 펌웨어
-- `tmag_lut_angle_test_f446re`: AS5600 기준 LUT로 TMAG5170 출력축 각도 추정 성능을 검증하는 펌웨어
+`ActuatorConfig.output_encoder_type`는 runtime output encoder profile을 선택합니다.
 
-예시:
+- `VelocityOnly`: 별도 출력축 절대 엔코더 없이 velocity mode만 사용
+- `DirectInput`: `gear_ratio == 1:1`에서 `AS5048A` 입력축 엔코더를 출력축
+  각도 센서로 직접 사용
+- `As5600`: `AS5600`을 runtime 출력축 엔코더로 사용
+- `TmagLut`: 저장된 `TMAG5170` LUT calibration을 runtime 출력축 엔코더로 사용
+
+`TmagLut` runtime은 valid TMAG calibration이 필요합니다. Calibration flow는
+`AS5600`을 reference encoder로 사용하지만, calibration 성공만으로 runtime
+profile을 자동 승격하지 않습니다. Profile 변경은 지원되는 config path를 통해
+명시적으로 수행해야 합니다.
+
+## Control And CAN Behavior
+
+메인 firmware는 command-driven control mode를 사용합니다.
+
+- angle command 수신: output-angle control
+- velocity command 수신: output-velocity control
+- angle command timeout: current-angle hold
+- velocity command timeout: zero velocity command
+
+대표 CAN frame family:
+
+- output angle command/status: `0x200 + node_id`, `0x400 + node_id`
+- output velocity command/status: `0x210 + node_id`, `0x410 + node_id`
+- actuator limits/status/config/diagnostic frame은
+  [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)를 기준으로 유지합니다.
+
+## Build
+
+기본 빌드는 `custom_f446re_s01`입니다.
 
 ```bash
-pio run -e custom_f446re
+pio run
 ```
+
+대표 build check:
 
 ```bash
-pio run -e fram_test_f446re
+pio run -e custom_f446re_s01
+pio run -e custom_f446re_d01
+pio run -e tmag_calibration_runner_f446re
 ```
+
+보드별 upload 예시:
 
 ```bash
-pio run -e tmag_comm_test_f446re
+pio run -e custom_f446re_s01 -t upload
 ```
+
+TMAG LUT calibration firmware upload 예시:
 
 ```bash
-pio run -e tmag_sensor_test_f446re
+pio run -e tmag_calibration_runner_f446re -t upload
 ```
+
+## Verification
+
+Protocol-only regression:
 
 ```bash
-pio run -e tmag_xyz_live_test_f446re
+python3 tools/can_spec_test.py --protocol-only
 ```
+
+CAN hardware가 연결되어 있고 motion이 필요 없는 상태 확인:
 
 ```bash
-pio run -e tmag_lut_angle_test_f446re
+python3 tools/can_spec_test.py --iface can0 --node-id 1
 ```
 
-`pio run`만 실행하면 기본값으로 메인 펌웨어만 빌드됩니다. 평소 개발과 배포는 이 경로만 사용하면 됩니다.
+`--allow-arm` 또는 `--allow-motion`은 현재 세션에서 arming/motion이 안전하다고
+명시적으로 확인된 경우에만 사용하세요.
 
-## 현재 운영 PID 값
+CAN UI smoke test:
 
-현재 steering 운영 기준 PID 값은 아래와 같습니다.
+```bash
+python3 tools/can_ui/smoke_test.py
+```
 
-- 적용 위치: [include/board_config.h](/home/gyungminnoh/projects/NoFW/NoFW/include/board_config.h), [src/main.cpp](/home/gyungminnoh/projects/NoFW/NoFW/src/main.cpp)
-- `motor.PID_velocity.P = 0.12`
-- `motor.PID_velocity.I = 2.0`
-- `motor.PID_velocity.D = 0.0`
-- `motor.LPF_velocity.Tf = 0.007`
-- `pvc.Kp = 3.0`
+## Current Board Defaults
 
-이 값은 2026-04-25 기준 `S01` 실기 재튜닝 후 유지하기로 결정한 설정입니다.
-큰 각도 이동에서도 불안정한 지속 발진은 보이지 않았고, 현재는 추가 조정 없이 이 값을 운영 기준으로 사용합니다.
+Steering firmware:
 
-Driving `D01..D04`는 steering보다 낮은 감속비(`78:15`, `5.2:1`)를 사용하므로 별도 velocity PI를 적용합니다.
+- `S01..S04`: node id `1..4`
+- 기본 profile은 build/source default와 FRAM config에 따라 결정
+- `S01`, `S04`: `BUILD_MOTOR_TO_OUTPUT_SIGN=-1`
 
-- 적용 위치: [platformio.ini](/home/gyungminnoh/projects/NoFW/NoFW/platformio.ini)
-- `motor.PID_velocity.D = 0.0`
-- `motor.LPF_velocity.Tf = 0.01`
-- `pvc.Kp = 3.0` 유지, 단 `VelocityOnly` profile에서는 angle outer loop를 사용하지 않습니다.
+Driving firmware:
 
-현재 driving velocity PI 값:
+- `D01..D04`: node id `5..8`
+- `VelocityOnly`
+- `21` pole pairs
+- gear ratio `5.2`
+- FOC align voltage `5.0V`
+- torque limit override `30.0V`
+- velocity PI: `P=0.18`, `I=7.0`, `D=0.0`, `LPF=0.01`
 
-- `D01..D04`: `P = 0.18`, `I = 7.0`
+FRAM에 valid config가 있으면 runtime은 저장된 config를 우선 사용합니다. 펌웨어
+build default는 config가 없거나 invalid일 때의 seed 값으로 취급하세요.
 
-`D02`는 2026-04-26 실기 테스트에서 여러 후보를 비교했고, 이후 사용자가 지정한 D02 기준값을 `D01..D04` driving 펌웨어에 통일했습니다. `D01..D04`는 모두 `VelocityOnly` profile, `21` pole pairs, `5.2:1` gear ratio, SVPWM으로 빌드합니다.
+## FRAM Storage Policy
 
-FOC sensor alignment voltage는 기본 `1.0V`입니다. 기계 저항이 큰 driving 감속기에서는 보드별 빌드 플래그 `BUILD_ALIGN_VOLTAGE`로 올릴 수 있으며, 현재 `D01..D04` driving 펌웨어는 모두 `5.0V`로 빌드합니다.
-
-전압 기반 torque limit의 공통 소스 기본값은 `TORQUE_LIMIT_VOLTS = 12.0V`입니다. 보드별 빌드 플래그 `BUILD_TORQUE_LIMIT_VOLTS`로 override할 수 있으며, 현재 `D01..D04` driving 펌웨어는 모두 `40.0V`로 빌드합니다.
-
-## FRAM calibration 저장 정책
-
-Actuator config는 현재 store version의 `ActuatorConfig`만 읽습니다.
-예전 config layout은 마이그레이션하지 않고, 읽기 실패 시 현재 펌웨어 build default로 새로 저장합니다.
+Actuator config는 현재 store version의 `ActuatorConfig`만 읽습니다. 예전 config
+layout은 migration하지 않고, 읽기 실패 시 현재 firmware build default로 새로
+저장합니다.
 
 Calibration bundle은 FRAM의 두 fixed slot에 저장됩니다.
 
-- 각 slot은 `magic`, `version`, `sequence`, `crc32`, commit marker, payload를 포함합니다.
-- 저장할 때는 payload 전체를 먼저 쓰고, commit marker를 마지막에 씁니다.
-- 읽을 때는 header, commit marker, CRC, 각 calibration payload의 sanity check가 모두 통과한 최신 sequence만 사용합니다.
-- 예전 단일 calibration record는 더 이상 fallback으로 읽지 않습니다.
-
-따라서 이 정책이 적용된 펌웨어를 처음 올린 보드는 기존 FRAM의 예전 calibration 값을 무시합니다.
-보드별로 처음 `arm`할 때 FOC와 출력축 zero 기준을 다시 만들고 새 trusted slot에 저장해야 합니다.
-
-## FRAM 진단 펌웨어
-
-외장 `FM25CL64B-G`가 정상 동작하는지 메인 펌웨어와 분리해서 확인하려면
-`fram_test_f446re`를 사용하면 됩니다.
-
-이 펌웨어는 제품 기능용이 아니라 아래 상황에서 쓰는 유지보수 도구입니다.
-
-- 새 PCB 조립 직후 FRAM 하드웨어 점검
-- SPI 배선 변경 후 회귀 확인
-- 저장 관련 이상 증상 발생 시 원인 분리
-
-- 테스트 대상: FRAM 마지막 128바이트 예약 영역
-- 확인 항목: 주소 범위 검사, 즉시 write/read 검증, 전원 재인가 후 데이터 유지 검증
-- 캘리브레이션 저장 영역과는 분리된 주소를 사용하므로 메인 저장 데이터는 건드리지 않습니다.
-
-권장 순서는 아래와 같습니다.
-
-1. `fram_test_f446re`를 업로드합니다.
-2. CAN에서 `0x5A0 + CAN_NODE_ID`, `0x5B0 + CAN_NODE_ID`, `0x5C0 + CAN_NODE_ID`를 확인합니다.
-3. 요약 프레임 상태 코드가 `1`이면 전원을 완전히 껐다 켭니다.
-4. 다시 확인했을 때 상태 코드가 `2`이면 write/read와 전원 재인가 유지까지 모두 통과한 것입니다.
-
-진단 결과는 CAN 표준 프레임으로 반복 송신합니다.
-
-- CAN ID: `0x5A0 + CAN_NODE_ID`
-- 저수준 진단 ID: `0x5B0 + CAN_NODE_ID`
-- 상태레지스터 진단 ID: `0x5C0 + CAN_NODE_ID`
-- 주기: `500 ms`
-- Byte 0: `0xF6` 고정 시그니처
-- Byte 1: 상태 코드
-- Byte 2: 실패 단계 번호
-- Byte 4-5: 실패 주소 (little-endian)
-
-저수준 진단 프레임은 아래 형식입니다.
-
-- Byte 0: `0xF7`
-- Byte 1: `WREN` 전 상태 레지스터
-- Byte 2: `WREN` 후 상태 레지스터
-- Byte 3: 테스트 write 후 상태 레지스터
-- Byte 4: 테스트 주소의 원래 값
-- Byte 5: 써야 했던 기대값
-- Byte 6: write 후 실제 읽힌 값
-
-상태레지스터 진단 프레임은 아래 형식입니다.
-
-- Byte 0: `0xF8`
-- Byte 1: `WRSR` 전 BP 비트(`BP1:BP0`)
-- Byte 2: `WRSR` 후 BP 비트(`BP1:BP0`)
-- Byte 3: 원복 후 BP 비트(`BP1:BP0`)
-
-상태 코드는 아래와 같습니다.
-
-- `0`: 실패
-- `1`: 1차 쓰기/읽기 성공, 전원 껐다 켠 뒤 재검증 필요
-- `2`: 전원 재인가 후 유지 검증까지 성공
-
-정상 완료 기준:
-
-- `0x5A0 + CAN_NODE_ID` 프레임의 Byte 1이 `2`
-- `0x5B0 + CAN_NODE_ID` 프레임에서 기대값과 실제 읽기값이 일치
-- `0x5C0 + CAN_NODE_ID` 프레임에서 BP 비트 변경과 원복이 정상
-
-## TMAG5170 통신 확인용 진단 펌웨어
-
-SPI 버스의 `SPI1_nCS_3`에 연결된 `TMAG5170`의 기본 SPI 통신과 레지스터 접근만 확인하려면
-`tmag_comm_test_f446re`를 사용하면 됩니다.
-
-이 펌웨어는 아래 상황에서 쓰는 유지보수 도구입니다.
-
-- 새 PCB 조립 직후 TMAG5170 SPI 통신 확인
-- SPI 버스 변경 후 CS/배선 회귀 확인
-- TMAG5170 응답 이상 시 통신 계층 문제 분리
-
-검사 항목은 아래와 같습니다.
-
-- CRC 비활성화 명령 적용 확인
-- `TEST_CONFIG` 레지스터 read/write 확인
-- `AFE_STATUS` 레지스터 읽기 확인
-
-진단 결과는 CAN 표준 프레임으로 반복 송신합니다.
-
-- 요약 ID: `0x5D0 + CAN_NODE_ID`
-- 설정 ID: `0x5E0 + CAN_NODE_ID`
-- 상세 ID: `0x5F0 + CAN_NODE_ID`
-- 주기: `500 ms`
-
-요약 프레임 형식:
-
-- Byte 0: `0xD6`
-- Byte 1: 상태 코드
-- Byte 2: 실패 단계
-- Byte 4-5: `OSC_MONITOR` 값
-
-설정 프레임 형식:
-
-- Byte 0: `0xD7`
-- Byte 1-2: CRC 비활성화 후 `TEST_CONFIG`
-- Byte 3-4: HFOSC 시작 후 `TEST_CONFIG`
-- Byte 5-6: 첫 번째 `AFE_STATUS`
-
-상세 프레임 형식:
-
-- Byte 0: `0xD8`
-- Byte 1-2: 두 번째 `AFE_STATUS`
-- Byte 3-4: CRC 비활성화 후 SPI 상태 비트
-- Byte 5-6: HFOSC 시작 후 SPI 상태 비트
-- Byte 7: CRC 비활성화 명령 응답의 최하위 바이트
-
-상태 코드는 아래와 같습니다.
-
-- `0`: 실패
-- `1`: 통과
-
-## TMAG5170 센서 동작 확인용 진단 펌웨어
-
-TMAG5170이 실제로 자기장 데이터를 내는지 확인하려면 `tmag_sensor_test_f446re`를 사용하면 됩니다.
-
-이 펌웨어는 아래 상황에서 쓰는 유지보수 도구입니다.
-
-- 자석 위치 변화에 따라 TMAG5170 출력이 변하는지 확인
-- 실제 측정 레지스터가 읽히는지 확인
-- 통신은 되는데 센서 결과가 이상할 때 원인 분리
-
-진단 결과는 CAN 표준 프레임으로 반복 송신합니다.
-
-- 상태 ID: `0x600 + CAN_NODE_ID`
-- 축 결과 ID: `0x610 + CAN_NODE_ID`
-- 보조 결과 ID: `0x620 + CAN_NODE_ID`
-- 주기: `100 ms`
-
-상태 프레임 형식:
-
-- Byte 0: `0xE6`
-- Byte 1-2: `CONV_STATUS`
-- Byte 3-4: `CONV_STATUS` read 시 SPI 상태 비트
-
-축 결과 프레임 형식:
-
-- Byte 0: `0xE7`
-- Byte 1-2: `X_CH_RESULT`
-- Byte 3-4: `Y_CH_RESULT`
-- Byte 5-6: `Z_CH_RESULT`
-
-보조 결과 프레임 형식:
-
-- Byte 0: `0xE8`
-- Byte 1-2: `TEMP_RESULT`
-- Byte 3-4: `X_CH_RESULT` read 시 SPI 상태 비트
-- Byte 5-6: `Y_CH_RESULT` read 시 SPI 상태 비트
-- Byte 7: `Z_CH_RESULT` read 시 SPI 상태 하위 바이트
-
-## TMAG5170 실시간 XYZ 확인 펌웨어
-
-자기장 벡터를 손으로 돌려보며 바로 확인하려면 `tmag_xyz_live_test_f446re`를 사용하면 됩니다.
-
-이 펌웨어는 아래 상황에서 유용합니다.
-
-- 자석을 손으로 움직일 때 `X/Y/Z` 값이 실제로 변하는지 확인
-- 센서 방향을 바꾸었을 때 각 축의 부호와 변화 경향 확인
-- LUT 캘리브레이션 전에 하드웨어 배치가 대략 맞는지 빠르게 점검
-
-진단 결과는 CAN 표준 프레임으로 반복 송신합니다.
-
-- 상태 ID: `0x600 + CAN_NODE_ID`
-- mT ID: `0x610 + CAN_NODE_ID`
-- raw ID: `0x620 + CAN_NODE_ID`
-- 설정 ID: `0x630 + CAN_NODE_ID`
-- X/Y/Z 원시 SPI 프레임 ID: `0x640`, `0x650`, `0x660` + `CAN_NODE_ID`
-- 디코드 보조 ID: `0x670 + CAN_NODE_ID`
-
-## TMAG5170 LUT 기반 출력축 각도 검증 펌웨어
-
-출력축 각도를 `TMAG5170` 단독으로 어느 정도 복원할 수 있는지 확인하려면
-`tmag_lut_angle_test_f446re`를 사용하면 됩니다.
-
-이 펌웨어는 아래 목적에 맞는 유지보수 도구입니다.
-
-- `AS5600` 기준으로 `TMAG5170 XYZ -> output angle` LUT를 생성
-- 혼합된 자계에서도 출력축 각도 추정이 가능한지 검증
-- calibration RMS와 validation RMS를 분리해서 확인
-
-동작 개요:
-
-- 부팅 후 잠시 대기한 뒤 모터를 자동으로 약 `2 x 1.15` 출력회전 구간 구동
-- 첫 구간에서 LUT 캘리브레이션 수행
-- 두 번째 구간에서 LUT 추정각과 `AS5600` 기준각의 오차 누적
-
-진단 결과는 CAN 표준 프레임으로 반복 송신합니다.
-
-- 요약 ID: `0x780 + CAN_NODE_ID`
-- 각도 ID: `0x790 + CAN_NODE_ID`
-- 통계 ID: `0x7A0 + CAN_NODE_ID`
-- 벡터 ID: `0x7B0 + CAN_NODE_ID`
-- 진폭 ID: `0x7C0 + CAN_NODE_ID`
-
-핵심 프레임 형식:
-
-- `0xF1`: phase, fit ready, calibration sample 수, LUT valid bin 수
-- `0xF2`: 기준각, LUT 추정각, 순간 오차, 선택된 LUT bin
-- `0xF3`: calibration RMS, validation RMS, validation MAE
-- `0xF4`: 최신 `TMAG X/Y/Z raw`
-- `0xF5`: 축별 amplitude와 최대 검증 오차
-
-`AS5600` 기준각에 대해 `TMAG X/Y/Z`를 한 바퀴 구간으로 그래프화하려면 아래 순서로 진행하면 됩니다.
-
-```bash
-pio run -e tmag_lut_angle_test_f446re -t upload
-candump -L can0 > capture/tmag_lut.log
-.venv/bin/python tools/plot_tmag_as5600_turn.py capture/tmag_lut.log --show
-```
-
-이 스크립트는 기본적으로 calibration phase에서 첫 번째 360도 구간을 찾아
-`capture/tmag_as5600_turn.png`와 `capture/tmag_as5600_turn.csv`를 생성합니다.
-
-## CAN 동작
-
-현재 메인 펌웨어는 다음 정책을 사용합니다.
-
-- 명령 RX: `0..100%` open percent
-- 위치 TX: 현재 모터 위치 기반 open percent
-- timeout: 일정 시간 유효한 RX가 없으면 현재 위치 유지
-- 첫 유효 명령을 받기 전까지는 부팅 기본 목표를 유지
-
-프레임 형식과 자세한 예시는 [docs/can_protocol.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_protocol.md)를 참고하면 됩니다.
-
-## 개발 메모
-
-- 테스트 중 생성되는 `capture/` 로그와 그래프는 보관 대상이 아니라 필요할 때 다시 생성하는 용도로 봅니다.
+- 각 slot은 `magic`, `version`, `sequence`, `crc32`, commit marker, payload를 포함
+- 저장 시 payload를 먼저 쓰고 commit marker를 마지막에 기록
+- 읽을 때 header, commit marker, CRC, payload sanity check가 모두 통과한 최신
+  sequence만 사용
+- 예전 단일 calibration record는 fallback으로 읽지 않음
+
+따라서 이 정책이 적용된 firmware를 처음 올린 보드는 기존 FRAM의 예전
+calibration 값을 무시할 수 있습니다. 필요한 경우 첫 arm/calibration에서 새
+trusted slot을 생성해야 합니다.
+
+## Repository Hygiene
+
+Tracked source/docs에는 active firmware, maintained tools, 유지되는 Markdown
+문서만 남기는 것을 원칙으로 합니다.
+
+- raw experiment CSV/SVG/PNG/log/generated JSON은 active docs에 보관하지 않음
+- local capture와 build/cache 산출물은 untracked로 유지
+- 작업 기록은 `agents.md`에 append하지 않고 필요 시 `docs/worklog/YYYY-MM-DD.md`
+  사용
