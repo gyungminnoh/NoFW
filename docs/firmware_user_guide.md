@@ -664,3 +664,4 @@ gear ratio 변경은 출력축 좌표계 해석 자체를 바꾼다.
 - [can_test_web_ui_mvp.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/can_test_web_ui_mvp.md)
 - [host_controller_integration_guide.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/host_controller_integration_guide.md)
 - [tmag_output_encoder_report.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/tmag_output_encoder_report.md)
+- [historical_reports.md](/home/gyungminnoh/projects/NoFW/NoFW/docs/historical_reports.md)
